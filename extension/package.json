@@ -1,0 +1,9 @@
+{
+  "name": "hypha-debugger-extension",
+  "version": "0.4.0",
+  "private": true,
+  "description": "MV3 Chrome extension: attach a Hypha debugger to any site, controllable by AI agents over Hypha RPC. Works on strict-CSP pages.",
+  "scripts": {
+    "build": "cd ../javascript && npm run build:extension"
+  }
+}

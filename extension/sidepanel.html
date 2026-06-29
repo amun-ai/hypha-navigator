@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hypha Debugger</title>
+    <style>
+      :root {
+        --bg: #0f1117; --surface: #161b22; --border: #30363d; --text: #e1e4e8;
+        --muted: #8b949e; --accent: #39B6FF; --accent2: #BD45FB; --green: #3fb950;
+        --red: #f85149; --yellow: #d29922;
+      }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body {
+        font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background: var(--bg); color: var(--text);
+        display: flex; flex-direction: column; height: 100vh;
+      }
+      header {
+        padding: 12px 14px; border-bottom: 1px solid var(--border);
+        display: flex; align-items: center; gap: 8px;
+      }
+      header .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: none; }
+      header .dot.connected { background: var(--green); box-shadow: 0 0 6px var(--green); }
+      header .dot.connecting { background: var(--yellow); }
+      header .dot.error { background: var(--red); }
+      header h1 {
+        font-size: 14px; font-weight: 600;
+        background: linear-gradient(135deg, var(--accent), var(--accent2));
+        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      }
+      header .tab { margin-left: auto; color: var(--muted); font-size: 11px; max-width: 130px;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .panel { padding: 12px 14px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
+      label { font-size: 11px; color: var(--muted); }
+      input[type=text] {
+        width: 100%; padding: 7px 9px; background: var(--bg); border: 1px solid var(--border);
+        border-radius: 7px; color: var(--text); font: inherit; font-size: 12px;
+      }
+      .row { display: flex; gap: 8px; align-items: center; }
+      button {
+        padding: 7px 14px; border: none; border-radius: 7px; font: inherit; font-weight: 600;
+        font-size: 12px; cursor: pointer; color: #fff;
+        background: linear-gradient(135deg, var(--accent), var(--accent2));
+      }
+      button.secondary { background: var(--surface); border: 1px solid var(--border); color: var(--text); }
+      button:disabled { opacity: .5; cursor: default; }
+      .url { display: none; flex-direction: column; gap: 4px; }
+      .url.show { display: flex; }
+      .url code {
+        font-family: "SF Mono", monospace; font-size: 11px; color: var(--accent);
+        background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+        padding: 6px 8px; word-break: break-all;
+      }
+      details summary { cursor: pointer; color: var(--muted); font-size: 11px; }
+      details .row { margin-top: 6px; }
+      .logs { flex: 1; overflow-y: auto; padding: 8px 10px; font-family: "SF Mono", monospace; font-size: 11px; }
+      .log { padding: 2px 0; white-space: pre-wrap; word-break: break-word; border-bottom: 1px solid rgba(255,255,255,.03); }
+      .log .t { color: var(--muted); }
+      .log.call .k { color: var(--accent); }
+      .log.result .k { color: var(--green); }
+      .log.error .k { color: var(--red); }
+      .log.status .k { color: var(--yellow); }
+      .logs-head { display: flex; align-items: center; padding: 8px 14px 4px; }
+      .logs-head span { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+      .logs-head button { margin-left: auto; padding: 2px 8px; font-size: 10px; font-weight: 500; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <span class="dot" id="dot"></span>
+      <h1 id="title">Hypha Debugger</h1>
+    </header>
+
+    <div class="panel">
+      <div>
+        <label for="server">Hypha server URL</label>
+        <input type="text" id="server" value="https://hypha.aicell.io" spellcheck="false" />
+      </div>
+      <div class="row">
+        <button id="connect">Connect browser</button>
+        <button id="disconnect" class="secondary" disabled>Disconnect</button>
+      </div>
+      <div class="url" id="urlBox">
+        <label>Service URL — paste into your AI agent</label>
+        <code id="url"></code>
+        <div class="row">
+          <button class="secondary" id="copyUrl" style="font-size:11px;padding:4px 10px;">Copy URL</button>
+          <button class="secondary" id="copySkill" style="font-size:11px;padding:4px 10px;">Copy agent prompt</button>
+        </div>
+      </div>
+      <div class="row" id="targetBox" style="font-size:11px;color:var(--muted);">
+        <span>Target tab:</span>
+        <strong id="targetTab" title="" style="color:var(--text);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;">—</strong>
+        <button class="secondary" id="focusTab" title="Bring the target tab to the front so you can see what the agent is operating on" style="font-size:10px;padding:3px 8px;white-space:nowrap;">Focus</button>
+        <button class="secondary" id="pinTab" style="font-size:10px;padding:3px 8px;white-space:nowrap;">Pin current</button>
+      </div>
+      <div class="row" id="skillsBox" style="font-size:11px;color:var(--muted);" title="Per-site markdown notes the agent accumulates over time (grouped by site origin)">
+        <span id="skillsInfo" style="flex:1;">Site skills: 0</span>
+      </div>
+      <details>
+        <summary>Advanced</summary>
+        <div class="row">
+          <input type="text" id="workspace" placeholder="workspace (optional)" />
+          <input type="text" id="token" placeholder="token (optional)" />
+        </div>
+        <label class="row" style="margin-top:6px;cursor:pointer;">
+          <input type="checkbox" id="requireToken" /> require token (protected)
+        </label>
+        <div class="row" style="margin-top:8px;" title="Per-site skills as a JSON file">
+          <span style="flex:1;color:var(--muted);">Site skills</span>
+          <button class="secondary" id="exportSkills" style="font-size:10px;padding:3px 8px;">Export</button>
+          <button class="secondary" id="importSkills" style="font-size:10px;padding:3px 8px;">Import</button>
+        </div>
+      </details>
+    </div>
+
+    <div class="logs-head">
+      <span>Activity log</span>
+      <button class="secondary" id="clear">clear</button>
+    </div>
+    <div class="logs" id="logs"></div>
+
+    <script type="module" src="sidepanel.js"></script>
+  </body>
+</html>
