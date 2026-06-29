@@ -1,0 +1,33 @@
+name: Release
+
+# On a pushed tag like v0.1.0: build, package the versioned .zip, and attach it
+# to a GitHub Release. Tag should match manifest.json's version.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Typecheck + test
+        run: |
+          npm run typecheck
+          npm test
+      - name: Build + zip
+        run: npm run zip
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: hypha-navigator-extension-v*.zip
+          generate_release_notes: true

@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hypha Navigator — AI Browser Automation</title>
+    <meta
+      name="description"
+      content="A Chrome extension that lets AI agents drive your whole browser over Hypha RPC: tabs, navigation, DOM, screenshots, click/type by index, React, and arbitrary JavaScript on any page."
+    />
+    <style>
+      :root {
+        --bg: #0f1117; --surface: #161b22; --border: #30363d; --text: #e1e4e8;
+        --muted: #8b949e; --accent: #39b6ff; --accent2: #bd45fb; --green: #3fb950;
+      }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body {
+        font: 15px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background: var(--bg); color: var(--text);
+        -webkit-font-smoothing: antialiased;
+      }
+      a { color: var(--accent); text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      .wrap { max-width: 880px; margin: 0 auto; padding: 0 22px; }
+      header { text-align: center; padding: 72px 22px 40px; }
+      header .logo { font-size: 56px; line-height: 1; }
+      h1 {
+        font-size: 44px; font-weight: 800; letter-spacing: -0.02em; margin: 14px 0 6px;
+        background: linear-gradient(135deg, var(--accent), var(--accent2));
+        -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+      }
+      header p { color: var(--muted); font-size: 18px; max-width: 620px; margin: 0 auto; }
+      .cta { margin-top: 28px; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+      .btn {
+        display: inline-flex; align-items: center; gap: 8px; padding: 12px 22px; border-radius: 10px;
+        font-weight: 700; font-size: 15px; color: #fff;
+        background: linear-gradient(135deg, var(--accent), var(--accent2)); border: none;
+      }
+      .btn:hover { text-decoration: none; filter: brightness(1.08); }
+      .btn.secondary { background: var(--surface); border: 1px solid var(--border); color: var(--text); }
+      section { padding: 28px 0; border-top: 1px solid var(--border); }
+      h2 { font-size: 22px; margin-bottom: 14px; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+      .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; }
+      .card h3 { font-size: 15px; margin-bottom: 6px; }
+      .card p { color: var(--muted); font-size: 14px; }
+      ol { padding-left: 22px; } ol li { margin: 7px 0; }
+      code, pre { font-family: "SF Mono", ui-monospace, Menlo, monospace; font-size: 13px; }
+      code { background: var(--surface); border: 1px solid var(--border); border-radius: 5px; padding: 1px 6px; color: var(--accent); }
+      pre {
+        background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+        padding: 14px 16px; overflow-x: auto; margin: 12px 0; color: var(--text); line-height: 1.5;
+      }
+      pre code { background: none; border: none; padding: 0; color: inherit; }
+      .note { color: var(--muted); font-size: 13px; }
+      footer { text-align: center; color: var(--muted); font-size: 13px; padding: 40px 22px 64px; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <div class="logo">🧭</div>
+        <h1>Hypha Navigator</h1>
+        <p>
+          Let an AI agent drive your <b>whole browser</b> — over
+          <a href="https://github.com/amun-ai/hypha">Hypha</a> RPC. Tabs, navigation, DOM,
+          screenshots, click/type by index, React, and arbitrary JavaScript on any page.
+        </p>
+        <div class="cta">
+          <a
+            class="btn"
+            id="ext-download"
+            href="hypha-navigator-extension.zip?v=0.1.0"
+            download="hypha-navigator-extension.zip"
+          >
+            ⬇ Download extension (.zip)&nbsp;<span id="ext-version" style="opacity:.85;font-weight:500;">v0.1.0</span>
+          </a>
+          <a class="btn secondary" href="https://github.com/amun-ai/hypha-navigator">View on GitHub</a>
+        </div>
+        <p class="note" style="margin-top:14px;">MV3 · Chrome / Edge 116+ · load unpacked</p>
+      </header>
+
+      <section>
+        <h2>What it does</h2>
+        <div class="grid">
+          <div class="card">
+            <h3>🗂 Drive the browser</h3>
+            <p>Open, close, switch, and navigate tabs across windows — <code>list_tabs</code>, <code>open_tab</code>, <code>activate_tab</code>, <code>navigate</code>, history.</p>
+          </div>
+          <div class="card">
+            <h3>🔎 Inspect &amp; control pages</h3>
+            <p>Smart indexed DOM, click/type by index, select, scroll, screenshots, query DOM, get HTML, and a React component tree.</p>
+          </div>
+          <div class="card">
+            <h3>⚡ Run JS anywhere</h3>
+            <p><code>execute_script</code> runs arbitrary JavaScript even on strict-CSP pages, via the Chrome debugger (CDP <code>Page.setBypassCSP</code>).</p>
+          </div>
+          <div class="card">
+            <h3>🧠 Per-site skills</h3>
+            <p>The agent accumulates markdown <b>Agent Skills</b> bound to each site origin — it gets smarter and cheaper on every site over time.</p>
+          </div>
+          <div class="card">
+            <h3>📌 Stable target tab</h3>
+            <p>Pin the tab the agent works on; keep browsing in other tabs. The pin survives the extension going to sleep.</p>
+          </div>
+          <div class="card">
+            <h3>📜 Self-documenting</h3>
+            <p>Hand the agent one URL. <code>GET /get_skill_md</code> returns the full tool reference with curl examples.</p>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Install</h2>
+        <ol>
+          <li>Download the <b>.zip</b> above and unzip it somewhere permanent.</li>
+          <li>Open <code>chrome://extensions</code> and enable <b>Developer mode</b> (top-right).</li>
+          <li>Click <b>Load unpacked</b> and select the unzipped folder (the one with <code>manifest.json</code>).</li>
+          <li>Pin the <b>Hypha Navigator</b> toolbar icon and click it to open the side panel.</li>
+        </ol>
+      </section>
+
+      <section>
+        <h2>Use it from an agent</h2>
+        <p class="note">Click <b>Connect browser</b> in the side panel, copy the Service URL, then:</p>
+        <pre><code>curl "$SERVICE_URL/get_skill_md?_mode=last"          # full API + usage
+curl "$SERVICE_URL/list_tabs?_mode=last"
+curl -X POST "$SERVICE_URL/open_tab" -d '{"url":"https://example.com"}'
+curl "$SERVICE_URL/get_browser_state?_mode=last"     # current target tab</code></pre>
+      </section>
+
+      <footer>
+        <p>
+          <a href="https://github.com/amun-ai/hypha-navigator">GitHub</a> ·
+          <a href="https://github.com/amun-ai/hypha">Hypha</a> ·
+          MIT © Amun AI AB
+        </p>
+        <p style="margin-top:8px;">
+          Grew out of the extension in
+          <a href="https://github.com/amun-ai/hypha-debugger">hypha-debugger</a>.
+        </p>
+      </footer>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,38 @@
+{
+  "name": "hypha-navigator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Hypha Navigator — an MV3 Chrome extension that lets AI agents drive your whole browser (tabs, navigation, DOM, screenshots, click/type, React, and arbitrary JS on strict-CSP pages) over Hypha RPC.",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build-extension.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test \"test/*.test.mjs\"",
+    "zip": "node scripts/build-extension.mjs && node scripts/zip-extension.mjs"
+  },
+  "keywords": [
+    "hypha",
+    "rpc",
+    "chrome-extension",
+    "browser-automation",
+    "ai-agent",
+    "mcp",
+    "dom",
+    "web-automation"
+  ],
+  "author": "Amun AI AB",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/amun-ai/hypha-navigator.git"
+  },
+  "homepage": "https://amun-ai.github.io/hypha-navigator/",
+  "devDependencies": {
+    "esbuild": "^0.24.0",
+    "typescript": "^5.5.0"
+  },
+  "dependencies": {
+    "html-to-image": "^1.11.0",
+    "hypha-rpc": "^0.20.97"
+  }
+}
