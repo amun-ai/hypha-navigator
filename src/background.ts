@@ -101,6 +101,9 @@ async function attachSiteContext(value: any): Promise<void> {
 // The pinned target tab. storage.local is the single source of truth (survives
 // the SW being reaped); targetTabId is just a hot cache hydrated on each call.
 let targetTabId: number | null = null;
+// "Work in background" — when on, tab tools never steal focus. Hydrated from
+// storage and kept fresh via storage.onChanged below.
+let forceBackground = false;
 const ctx: BrowserToolCtx = {
   getTarget: () => targetTabId,
   setTarget: (id) => {
@@ -112,7 +115,16 @@ const ctx: BrowserToolCtx = {
     }
     void emitTarget(id);
   },
+  forceBackground: () => forceBackground,
 };
+
+async function hydrateForceBackground(): Promise<void> {
+  try {
+    forceBackground = !!(await chrome.storage.local.get("hyphaForceBackground")).hyphaForceBackground;
+  } catch {
+    /* ignore */
+  }
+}
 
 /**
  * Authoritative read of the pinned target from storage on every call, so a
@@ -199,6 +211,7 @@ async function ensureContent(tabId: number): Promise<void> {
 async function handleCall(method: string, args: any[]): Promise<any> {
   ui({ type: "log", msg: `${method}(${summarize(args)})`, kind: "call" });
   await hydrateTarget(); // restore the pinned tab if the SW was reaped
+  await hydrateForceBackground(); // restore the focus-mode setting too
   try {
     let value: any;
     if (BROWSER_TOOL_NAMES.has(method)) {
@@ -384,6 +397,7 @@ chrome.storage?.onChanged?.addListener((changes: any, area: string) => {
   if (area !== "local") return;
   if (changes.hyphaSiteSkills) void mirrorSkillsToSync(changes.hyphaSiteSkills.newValue || {});
   if (changes.hyphaSiteTools) void mirrorToolsToSync(changes.hyphaSiteTools.newValue || {});
+  if (changes.hyphaForceBackground) forceBackground = !!changes.hyphaForceBackground.newValue;
 });
 
 chrome.sidePanel?.setPanelBehavior?.({ openPanelOnActionClick: true }).catch(() => {});

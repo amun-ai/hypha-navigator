@@ -14,6 +14,9 @@ import { autoReturn } from "./shared/services/execute.js";
 export interface BrowserToolCtx {
   getTarget: () => number | null;
   setTarget: (tabId: number) => void;
+  /** When true, never steal focus: open tabs in the background and retarget
+   *  without bringing the tab to front. The "Focus" button is the manual override. */
+  forceBackground?: () => boolean;
 }
 
 // ---- CDP eval: run JS in the page bypassing its CSP (incl. no-unsafe-eval) --
@@ -534,7 +537,9 @@ export const BROWSER_TOOLS: Record<string, Tool> = {
       },
     },
     run: async (ctx, [url, focus = true]) => {
-      const t = await chrome.tabs.create({ url, active: !!focus });
+      // In force-background mode, never steal focus — open the tab inactive.
+      const active = ctx.forceBackground?.() ? false : !!focus;
+      const t = await chrome.tabs.create({ url, active });
       ctx.setTarget(t.id);
       // A freshly-created tab's URL hasn't committed yet, so t.url is "" and the
       // derived origin would be empty — fall back to the requested URL.
@@ -563,7 +568,7 @@ export const BROWSER_TOOLS: Record<string, Tool> = {
     schema: {
       name: "activate_tab",
       description:
-        "Focus a tab by id and make it the target for page-level tools (get_browser_state, click_element_by_index, screenshot, …).",
+        "Make a tab the target for page-level tools (get_browser_state, click_element_by_index, screenshot, …). By default it also brings the tab to the front; in 'work in background' mode it just retargets without stealing focus.",
       parameters: {
         type: "object",
         properties: { tab_id: { type: "number", description: "Tab id to target" } },
@@ -571,15 +576,21 @@ export const BROWSER_TOOLS: Record<string, Tool> = {
       },
     },
     run: async (ctx, [tab_id]) => {
-      const t = await chrome.tabs.get(tab_id);
-      await chrome.tabs.update(tab_id, { active: true });
-      try {
-        await chrome.windows.update(t.windowId, { focused: true });
-      } catch {
-        /* ignore */
+      const bg = ctx.forceBackground?.();
+      if (!bg) {
+        // Default: bring the tab to the front and focus its window.
+        const t = await chrome.tabs.get(tab_id);
+        await chrome.tabs.update(tab_id, { active: true });
+        try {
+          await chrome.windows.update(t.windowId, { focused: true });
+        } catch {
+          /* ignore */
+        }
       }
+      // In background mode, just retarget — don't activate the tab or focus the
+      // window, so the user isn't interrupted.
       ctx.setTarget(tab_id);
-      return { success: true, tab: tabSummary(await chrome.tabs.get(tab_id)) };
+      return { success: true, background: !!bg, tab: tabSummary(await chrome.tabs.get(tab_id)) };
     },
   },
 

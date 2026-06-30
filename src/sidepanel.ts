@@ -138,6 +138,12 @@ $("focusTab").addEventListener("click", () => {
   chrome.runtime.sendMessage({ __ctl: "focusTarget" });
 });
 
+// "Work in background" — persist so the SW reads it (it never steals focus when on).
+const bgToggle = $("forceBackground") as HTMLInputElement;
+bgToggle.addEventListener("change", () => {
+  chrome.storage.local.set({ hyphaForceBackground: bgToggle.checked });
+});
+
 // ---- skills: show count + export/import as JSON --------------------------
 const SKILLS_KEY = "hyphaSiteSkills";
 async function refreshSkillsInfo(): Promise<void> {
@@ -211,7 +217,9 @@ serverInput.addEventListener("input", () => {
     "hyphaServerUrl",
     "hyphaStatus",
     "hyphaServiceUrl",
+    "hyphaForceBackground",
   ]);
+  bgToggle.checked = !!r.hyphaForceBackground;
   if (r.hyphaServerUrl) serverInput.value = r.hyphaServerUrl;
   if (r.hyphaStatus) status = r.hyphaStatus;
   if (r.hyphaServiceUrl) serviceUrl = r.hyphaServiceUrl;
