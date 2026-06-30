@@ -202,3 +202,38 @@ test("site tools sync round-trip uses separate keys and restores byte-identical"
   const after = (await chrome.storage.local.get("hyphaSiteTools")).hyphaSiteTools;
   assert.deepEqual(after, before);
 });
+
+test("call_site_tool surfaces the full error + stack trace on a runtime exception", async () => {
+  // chrome.debugger.Runtime.evaluate returns a CDP exceptionDetails for a throw
+  globalThis.chrome = {
+    storage: { local: makeArea(), sync: makeArea() },
+    tabs: { get: async (id) => ({ id, url: "https://shop.example/cart" }) },
+    debugger: {
+      attach: async () => {},
+      detach: async () => {},
+      sendCommand: async (_t, method) => {
+        if (method !== "Runtime.evaluate") return {};
+        return {
+          exceptionDetails: {
+            text: "Uncaught",
+            lineNumber: 0,
+            columnNumber: 12,
+            exception: {
+              className: "TypeError",
+              description: "TypeError: foo is not a function\n    at <anonymous>:1:13",
+            },
+            stackTrace: { callFrames: [{ functionName: "", url: "", lineNumber: 0, columnNumber: 12 }] },
+          },
+        };
+      },
+    },
+  };
+  const { BROWSER_TOOLS } = mod;
+  await BROWSER_TOOLS.set_site_tool.run(CTX, [ORIGIN, "boom", "throws", [], "foo()"]);
+  const r = await BROWSER_TOOLS.call_site_tool.run(CTX, [ORIGIN, "boom", {}]);
+  assert.equal(r.error, "TypeError: foo is not a function"); // one-line message
+  assert.equal(r.name, "TypeError"); // exception class
+  assert.match(r.stack, /at <anonymous>:1:13/); // FULL stack trace for debugging
+  assert.equal(r.line, 1); // 0-based CDP line → 1-based
+  assert.equal(r.column, 13);
+});

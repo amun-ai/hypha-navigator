@@ -53,6 +53,59 @@ export function forgetTab(tabId: number): void {
   attached.delete(tabId);
 }
 
+function safeStringify(v: any): string {
+  try {
+    return typeof v === "string" ? v : JSON.stringify(v);
+  } catch {
+    return String(v);
+  }
+}
+
+/**
+ * Turn a CDP exceptionDetails into a structured, debuggable error: the message,
+ * the exception class (TypeError, …), the FULL stack trace, and the 1-based
+ * location. `error` is the one-line message; `stack` is the complete trace so the
+ * agent can debug. (Line/column are relative to the evaluated wrapper — code runs
+ * inside an `(async () => { … })()` and, for call_site_tool, a `const args = …;`
+ * preamble — so they're offset from your source by those leading lines.)
+ */
+function formatCdpException(ex: any): {
+  error: string;
+  name?: string;
+  stack?: string;
+  line?: number;
+  column?: number;
+} {
+  const exc = ex?.exception || {};
+  // For a thrown Error, exception.description is the full "Error: msg\n  at …" stack.
+  const description: string | undefined =
+    typeof exc.description === "string" ? exc.description : undefined;
+  // Structured fallback frames (thrown non-Errors, or when there's no description).
+  const frames: string | undefined = Array.isArray(ex?.stackTrace?.callFrames)
+    ? ex.stackTrace.callFrames
+        .map(
+          (f: any) =>
+            `    at ${f.functionName || "<anonymous>"} (${f.url || "<eval>"}:${(f.lineNumber ?? 0) + 1}:${(f.columnNumber ?? 0) + 1})`,
+        )
+        .join("\n")
+    : undefined;
+
+  let message: string;
+  if (description) message = description.split("\n")[0];
+  else if (exc.value !== undefined) message = safeStringify(exc.value);
+  else message = ex?.text || "Evaluation error";
+
+  const stack = description || (frames ? `${message}\n${frames}` : undefined);
+  const out: any = { error: message };
+  if (exc.className) out.name = exc.className;
+  if (stack && stack !== message) out.stack = stack;
+  if (ex?.lineNumber != null) {
+    out.line = ex.lineNumber + 1;
+    out.column = (ex.columnNumber ?? 0) + 1;
+  }
+  return out;
+}
+
 async function cdpEval(tabId: number, code: string, argsObj?: any): Promise<any> {
   try {
     await ensureAttached(tabId);
@@ -79,8 +132,7 @@ async function cdpEval(tabId: number, code: string, argsObj?: any): Promise<any>
     userGesture: true,
   });
   if (res?.exceptionDetails) {
-    const ex = res.exceptionDetails;
-    return { error: ex.exception?.description || ex.exception?.value || ex.text || "Evaluation error" };
+    return formatCdpException(res.exceptionDetails);
   }
   const r = res?.result || {};
   return { result: r.value !== undefined ? r.value : r.description ?? null, type: r.type };
@@ -658,7 +710,7 @@ export const BROWSER_TOOLS: Record<string, Tool> = {
     schema: {
       name: "execute_script",
       description:
-        "Run arbitrary JavaScript in the target tab's page context and return the result. Uses the Chrome debugger (Page.setBypassCSP), so it works even on strict-CSP pages that block 'unsafe-eval'. The last expression is auto-returned; async code is awaited. Attaching shows Chrome's 'debugging this browser' banner.",
+        "Run arbitrary JavaScript in the target tab's page context and return the result. Uses the Chrome debugger (Page.setBypassCSP), so it works even on strict-CSP pages that block 'unsafe-eval'. The last expression is auto-returned; async code is awaited. Attaching shows Chrome's 'debugging this browser' banner. On a runtime error it returns { error, name, stack, line, column } — the full message and stack trace, so you can debug and fix the script.",
       parameters: {
         type: "object",
         properties: { code: { type: "string", description: "JavaScript to execute" } },
@@ -1008,7 +1060,7 @@ export const BROWSER_TOOLS: Record<string, Tool> = {
     schema: {
       name: "call_site_tool",
       description:
-        "CALL a saved site tool by name with arguments — the fast path: runs the tool's stored code (no script re-sent), with your `args` injected in scope, on the current target tab. Validates required params and applies defaults. Pass the site `origin` (from tab/browser info; defaults to the current tab), the tool `name`, and `args` (an object of argument name→value). Returns {result, type} like execute_script, or {error}.",
+        "CALL a saved site tool by name with arguments — the fast path: runs the tool's stored code (no script re-sent), with your `args` injected in scope, on the current target tab. Validates required params and applies defaults. Pass the site `origin` (from tab/browser info; defaults to the current tab), the tool `name`, and `args` (an object of argument name→value). Returns {result, type} like execute_script; on a runtime error returns { error, name, stack, line, column } with the full stack trace so you can debug the tool (then fix it with set_site_tool).",
       parameters: {
         type: "object",
         properties: {

@@ -144,20 +144,27 @@ bgToggle.addEventListener("change", () => {
   chrome.storage.local.set({ hyphaForceBackground: bgToggle.checked });
 });
 
-// ---- skills: show count + export/import as JSON --------------------------
+// ---- skills + tools: show counts + export/import as JSON -----------------
 const SKILLS_KEY = "hyphaSiteSkills";
-async function refreshSkillsInfo(): Promise<void> {
-  const all = (await chrome.storage.local.get(SKILLS_KEY))[SKILLS_KEY] || {};
+const TOOLS_KEY = "hyphaSiteTools";
+function countStore(all: any): { sites: number; entries: number; here: number } {
   const sites = Object.keys(all).length;
   const entries = Object.values(all).reduce(
     (n: number, e: any) => n + Object.keys(e || {}).length,
     0,
   );
   const here = currentOrigin ? Object.keys(all[currentOrigin] || {}).length : 0;
-  const total = `${entries} across ${sites} site${sites === 1 ? "" : "s"}`;
-  $("skillsInfo").textContent = currentOrigin
-    ? `Site skills: ${here} for this site · ${total}`
-    : `Site skills: ${total}`;
+  return { sites, entries, here };
+}
+async function refreshSkillsInfo(): Promise<void> {
+  const r = await chrome.storage.local.get([SKILLS_KEY, TOOLS_KEY]);
+  const s = countStore(r[SKILLS_KEY] || {});
+  const t = countStore(r[TOOLS_KEY] || {});
+  const fmt = (c: { sites: number; entries: number; here: number }) =>
+    currentOrigin
+      ? `${c.here} here / ${c.entries} total`
+      : `${c.entries} across ${c.sites} site${c.sites === 1 ? "" : "s"}`;
+  $("skillsInfo").textContent = `Site skills: ${fmt(s)} · Tools: ${fmt(t)}`;
 }
 $("exportSkills").addEventListener("click", async () => {
   const all = (await chrome.storage.local.get(SKILLS_KEY))[SKILLS_KEY] || {};
@@ -198,7 +205,7 @@ $("importSkills").addEventListener("click", () => {
   input.click();
 });
 chrome.storage.onChanged?.addListener?.((changes: any, area: string) => {
-  if (area === "local" && changes[SKILLS_KEY]) void refreshSkillsInfo();
+  if (area === "local" && (changes[SKILLS_KEY] || changes[TOOLS_KEY])) void refreshSkillsInfo();
 });
 // Save the server URL as the user edits it (persists across sessions, even
 // without connecting).
