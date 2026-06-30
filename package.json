@@ -1,6 +1,6 @@
 {
   "name": "hypha-navigator",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "description": "Hypha Navigator — an MV3 Chrome extension that lets AI agents drive your whole browser (tabs, navigation, DOM, screenshots, click/type, React, and arbitrary JS on strict-CSP pages) over Hypha RPC.",
   "type": "module",

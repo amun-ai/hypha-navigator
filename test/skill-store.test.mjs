@@ -191,6 +191,25 @@ test("over-quota mirror falls back to catalog-only (names+descriptions, partial:
   assert.equal(restored[origin].fat.description, "a description that survives");
 });
 
+test("open_tab derives origin from the requested URL even before the tab URL commits", async () => {
+  // A freshly-created tab reports url:"" until navigation commits; open_tab must
+  // still return the destination origin (so site-skill scoping works immediately).
+  globalThis.chrome = {
+    storage: { local: makeArea(), sync: makeArea() },
+    tabs: {
+      async create({ url, active }) {
+        return { id: 42, url: "", title: "", active: !!active, windowId: 1, status: "loading" };
+      },
+    },
+  };
+  let targeted = null;
+  const ctx = { setTarget: (id) => (targeted = id), getTarget: () => targeted };
+  const r = await mod.BROWSER_TOOLS.open_tab.run(ctx, ["https://example.com/page", true]);
+  assert.equal(r.origin, "https://example.com");
+  assert.equal(r.url, "https://example.com/page");
+  assert.equal(targeted, 42);
+});
+
 test("INVARIANT: every tool's run() array-destructuring matches its schema property order", () => {
   const { BROWSER_TOOLS } = mod;
   for (const [toolName, tool] of Object.entries(BROWSER_TOOLS)) {

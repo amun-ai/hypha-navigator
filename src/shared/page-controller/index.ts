@@ -217,8 +217,10 @@ export class PageController {
       this.cleanUpAfterAction();
 
       const { direction, amount, index } = options;
+      // Use loose != null: a missing index arrives as `null` (not `undefined`)
+      // across the RPC/JSON boundary, and both mean "scroll the whole page".
       const element =
-        index !== undefined
+        index != null
           ? getElementByIndex(this.selectorMap, index)
           : null;
 
