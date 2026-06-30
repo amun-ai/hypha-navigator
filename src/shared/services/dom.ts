@@ -180,10 +180,13 @@ export function scrollTo(
     if (!el) {
       return { success: false, message: `No element found for selector: ${target}` };
     }
-    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    // Use instant ("auto") scrolling: smooth scrolling is rAF-driven and is
+    // throttled to a no-op on background (non-foreground) tabs, where the agent
+    // typically drives the page — so the scroll would silently never happen.
+    el.scrollIntoView({ behavior: "auto", block: "center" });
     return { success: true, message: `Scrolled to ${target}` };
   }
-  window.scrollTo({ left: target.x, top: target.y, behavior: "smooth" });
+  window.scrollTo({ left: target.x, top: target.y, behavior: "auto" });
   return { success: true, message: `Scrolled to (${target.x}, ${target.y})` };
 }
 

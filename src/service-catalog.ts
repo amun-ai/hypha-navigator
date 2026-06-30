@@ -13,8 +13,15 @@ import { BROWSER_TOOLS } from "./browser-tools.js";
 // execute_script is provided as a BROWSER tool (CDP, bypasses page CSP) instead
 // of the page-level one (which can't eval under strict CSP). navigate is
 // superseded by the browser-level navigate; get_skill_md is generated in the
-// offscreen from the full catalog.
-const PAGE_EXCLUDE = new Set(["navigate", "get_skill_md", "execute_script"]);
+// offscreen from the full catalog. take_screenshot is provided as a BROWSER tool
+// (CDP Page.captureScreenshot) instead of the page-level html-to-image one, which
+// stalls on background (non-foreground) tabs — the usual agent case.
+const PAGE_EXCLUDE = new Set([
+  "navigate",
+  "get_skill_md",
+  "execute_script",
+  "take_screenshot",
+]);
 
 export interface CatalogEntry {
   name: string;

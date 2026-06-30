@@ -83,6 +83,86 @@ async function cdpEval(tabId: number, code: string, argsObj?: any): Promise<any>
   return { result: r.value !== undefined ? r.value : r.description ?? null, type: r.type };
 }
 
+/**
+ * Screenshot via CDP Page.captureScreenshot. Unlike the html-to-image route (which
+ * relies on requestAnimationFrame/paint and silently STALLS on background tabs —
+ * the normal agent case), CDP renders the page off-screen and works regardless of
+ * tab focus/visibility. Supports element/viewport/full-page + downscale via clip.scale.
+ */
+async function cdpScreenshot(
+  tabId: number,
+  opts: {
+    selector?: string;
+    format?: string;
+    quality?: number;
+    max_width?: number;
+    max_height?: number;
+    full_page?: boolean;
+  },
+): Promise<any> {
+  try {
+    await ensureAttached(tabId);
+  } catch (e: any) {
+    return { error: "Could not attach the Chrome debugger to this tab: " + (e?.message ?? e) };
+  }
+  const send = (m: string, p?: any) => chrome.debugger.sendCommand({ tabId }, m, p || {});
+  try {
+    const fmt = opts.format === "png" ? "png" : "jpeg";
+    const q = Math.max(0, Math.min(1, opts.quality ?? 0.6));
+    const maxW = opts.max_width ?? 800;
+    const maxH = opts.max_height ?? 800;
+    const metrics: any = await send("Page.getLayoutMetrics");
+    const css = metrics.cssContentSize || metrics.contentSize || { width: 1280, height: 800 };
+    const vp = metrics.cssVisualViewport || {};
+
+    let clip: { x: number; y: number; width: number; height: number };
+    if (opts.selector) {
+      const r: any = await send("Runtime.evaluate", {
+        expression: `(()=>{const e=document.querySelector(${JSON.stringify(
+          opts.selector,
+        )});if(!e)return null;const b=e.getBoundingClientRect();return {x:b.left+scrollX,y:b.top+scrollY,width:b.width,height:b.height};})()`,
+        returnByValue: true,
+      });
+      const v = r?.result?.value;
+      if (!v) return { error: `No element found for selector: ${opts.selector}` };
+      clip = v;
+    } else if (opts.full_page) {
+      clip = { x: 0, y: 0, width: Math.ceil(css.width), height: Math.ceil(css.height) };
+    } else {
+      clip = {
+        x: vp.pageX || 0,
+        y: vp.pageY || 0,
+        width: Math.ceil(vp.clientWidth || css.width),
+        height: Math.ceil(vp.clientHeight || 800),
+      };
+    }
+    if (!clip.width || !clip.height) return { error: "Could not determine screenshot area" };
+
+    const scale = Math.min(1, maxW / clip.width, maxH / clip.height);
+    const params: any = {
+      format: fmt,
+      captureBeyondViewport: true,
+      clip: { ...clip, scale },
+    };
+    if (fmt === "jpeg") params.quality = Math.round(q * 100);
+
+    const shot: any = await send("Page.captureScreenshot", params);
+    const base64 = shot.data;
+    const media_type = fmt === "png" ? "image/png" : "image/jpeg";
+    return {
+      base64,
+      media_type,
+      data_url: `data:${media_type};base64,${base64}`,
+      format: fmt,
+      width: Math.round(clip.width * scale),
+      height: Math.round(clip.height * scale),
+      size_kb: Math.round((base64.length * 0.75) / 1024),
+    };
+  } catch (e: any) {
+    return { error: "Screenshot failed: " + (e?.message ?? e) };
+  }
+}
+
 type Tool = {
   schema: any;
   run: (ctx: BrowserToolCtx, args: any[]) => Promise<any>;
@@ -575,6 +655,27 @@ export const BROWSER_TOOLS: Record<string, Tool> = {
       },
     },
     run: async (ctx, [code]) => cdpEval(await resolveTarget(ctx), String(code ?? "")),
+  },
+
+  take_screenshot: {
+    schema: {
+      name: "take_screenshot",
+      description:
+        "Capture a screenshot of the target tab via the Chrome debugger (Page.captureScreenshot) — works reliably even when the tab is NOT in the foreground (unlike DOM-rasterizing approaches that stall on background tabs). Capture the viewport, a specific element (selector), or the full page. Downscaled to fit max_width × max_height (default 800px) and JPEG-encoded at quality 0.6 by default. Returns { base64, media_type, data_url, format, width, height, size_kb }. Use `base64` (raw, no prefix) directly with Claude/GPT image content fields; `data_url` for HTML <img src=...> previews. On failure returns { error }.",
+      parameters: {
+        type: "object",
+        properties: {
+          selector: { type: "string", description: "CSS selector of the element to capture. Omit for the viewport (or full page if full_page=true)." },
+          format: { type: "string", enum: ["png", "jpeg"], description: "Image format. Default: jpeg (smaller). Use png only when sharp text matters." },
+          quality: { type: "number", description: "JPEG quality 0–1. Default 0.6. Ignored for PNG." },
+          max_width: { type: "number", description: "Max output width in px. Default 800. Scaled down preserving aspect ratio." },
+          max_height: { type: "number", description: "Max output height in px. Default 800. Scaled down preserving aspect ratio." },
+          full_page: { type: "boolean", description: "If true, capture the entire scrollable page instead of just the viewport. Default false." },
+        },
+      },
+    },
+    run: async (ctx, [selector, format, quality, max_width, max_height, full_page]) =>
+      cdpScreenshot(await resolveTarget(ctx), { selector, format, quality, max_width, max_height, full_page }),
   },
 
   // ---- skill memory (accumulate per-origin know-how across sessions) ------
