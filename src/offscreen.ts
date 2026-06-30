@@ -187,11 +187,22 @@ async function connect(config: any): Promise<void> {
     };
     def.get_skill_md = baseWrapFn(skillFn);
 
-    const info: any = await withTimeout<any>(
-      server.registerService(def),
-      25000,
-      "register service",
-    );
+    // Register the service. Surface the EXACT failure (server rejection reason)
+    // into the side-panel log, and retry once — a registration can fail
+    // transiently right after (re)connect (e.g. the manager service not yet
+    // ready), which would otherwise leave the user stuck on "error".
+    const fnCount = Object.keys(def).filter((k) => typeof def[k] === "function").length;
+    ui({ type: "log", msg: `registering service with ${fnCount} tools …`, kind: "status" });
+    let info: any;
+    try {
+      info = await withTimeout<any>(server.registerService(def), 25000, "register service");
+    } catch (regErr: any) {
+      const detail = regErr?.message ?? String(regErr);
+      console.error("[hypha-offscreen] registerService failed:", regErr);
+      ui({ type: "log", msg: `registerService failed: ${detail} — retrying …`, kind: "error" });
+      await new Promise((r) => setTimeout(r, 1500));
+      info = await withTimeout<any>(server.registerService(def), 25000, "register service (retry)");
+    }
     serviceUrl = buildServiceUrl(config.server_url, info.id ?? serviceId);
     const workspace = server.config?.workspace ?? "";
     const token = config.require_token

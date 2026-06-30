@@ -918,6 +918,17 @@ export const BROWSER_TOOLS: Record<string, Tool> = {
             type: "array",
             description:
               "Parameter specs: array of {name, type?, description?, required?, default?}. These become the `args` keys at call time.",
+            items: {
+              type: "object",
+              properties: {
+                name: { type: "string", description: "Parameter name (becomes an `args` key)" },
+                type: { type: "string", description: "Optional JSON type hint, e.g. string/number/boolean" },
+                description: { type: "string", description: "What the parameter is for" },
+                required: { type: "boolean", description: "Whether the caller must supply it" },
+                default: { description: "Default value used when the caller omits it" },
+              },
+              required: ["name"],
+            },
           },
           code: {
             type: "string",
@@ -994,6 +1005,7 @@ export const BROWSER_TOOLS: Record<string, Tool> = {
           name: { type: "string", description: "Tool name to call (from list_site_tools)" },
           args: {
             type: "object",
+            additionalProperties: true,
             description: "Arguments object passed to the tool as `args` (keys are the tool's param names).",
           },
         },
