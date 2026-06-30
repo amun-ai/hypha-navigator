@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Hypha Navigator — AI Browser Automation",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Let AI agents drive your whole browser over Hypha RPC: open/close/switch tabs, navigate, inspect & control pages (DOM, screenshots, click/type by index, React), and run JavaScript on any page — even strict-CSP ones.",
   "minimum_chrome_version": "116",
   "permissions": ["scripting", "offscreen", "sidePanel", "storage", "unlimitedStorage", "tabs", "activeTab", "alarms", "debugger"],

@@ -313,7 +313,7 @@ export const BROWSER_TOOLS: Record<string, Tool> = {
     schema: {
       name: "open_tab",
       description:
-        "Open a new tab at a URL and make it the target for page-level tools. Returns the new tab.",
+        "Open a NEW tab at a URL and make it the target for page-level tools. Returns the new tab. Prefer `navigate(url)` to reuse the current target tab — use open_tab only when you genuinely need a separate/additional tab open at the same time. Remember to `close_tab` extra tabs when you're done with them.",
       parameters: {
         type: "object",
         properties: {
@@ -333,7 +333,8 @@ export const BROWSER_TOOLS: Record<string, Tool> = {
   close_tab: {
     schema: {
       name: "close_tab",
-      description: "Close a tab by id.",
+      description:
+        "Close a tab by id. Use this to clean up EXTRA tabs you opened with open_tab once you're done with them, so tabs don't pile up. Get ids from list_tabs.",
       parameters: {
         type: "object",
         properties: { tab_id: { type: "number", description: "Tab id to close" } },
@@ -374,7 +375,7 @@ export const BROWSER_TOOLS: Record<string, Tool> = {
     schema: {
       name: "navigate",
       description:
-        "Navigate the target tab to a URL (full page load). Use open_tab to navigate in a new tab instead.",
+        "Navigate the current target tab to a URL (full page load) — REUSES the existing tab, so this is the preferred way to move between pages. Use open_tab only when you need a separate tab.",
       parameters: {
         type: "object",
         properties: { url: { type: "string", description: "URL to navigate to" } },
