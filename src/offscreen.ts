@@ -87,6 +87,14 @@ const SKILL_GUIDANCE = [
   "",
   "Every result includes the target tab's `origin`; `get_active_tab`/`list_tabs` tell you which",
   "tab is the target and what else is open.",
+  "",
+  "**Target a SPECIFIC tab with `tab_id` (drive several tabs in parallel).** Page tools,",
+  "`execute_script`, `take_screenshot`, `navigate`, and the history tools all accept an optional",
+  "`tab_id` (the id from `open_tab`/`list_tabs`). Pass it to act on that EXACT tab WITHOUT",
+  "changing the shared default target — so you can work across multiple tabs at once, and",
+  "multiple agents can each operate on their own tab independently. Typical flow: `open_tab` →",
+  "use the returned tab id as `tab_id` on every following call. Omit `tab_id` to use the default",
+  "target tab (set by Pin / open_tab / activate_tab).",
 ].join("\n");
 
 function getConnect(): (cfg: any) => Promise<any> {

@@ -29,11 +29,33 @@ export interface CatalogEntry {
   kind: "page" | "browser";
 }
 
+// A leading optional `tab_id` lets the agent target a SPECIFIC tab per call (so
+// multiple agents can each drive their own tab) instead of the shared default
+// target. We inject it into every PAGE-tool schema here — as the FIRST property,
+// so it maps to args[0] — rather than editing each shared service. The SW strips
+// args[0] and routes the call to that tab (or the default target if omitted).
+const TAB_ID_PROP = {
+  tab_id: {
+    type: "number",
+    description:
+      "Optional: the tab to act on (id from open_tab/list_tabs). Omit to use the current default target tab. Pass it to operate on a specific tab — e.g. when several agents each work on their own tab. Using tab_id does NOT change the default target.",
+  },
+};
+function withTabId(schema: any): any {
+  return {
+    ...schema,
+    parameters: {
+      ...(schema.parameters || { type: "object" }),
+      properties: { ...TAB_ID_PROP, ...(schema.parameters?.properties || {}) },
+    },
+  };
+}
+
 export function buildCatalog(): CatalogEntry[] {
   const out: CatalogEntry[] = [];
   for (const e of createServiceMap()) {
     if (PAGE_EXCLUDE.has(e.name)) continue;
-    out.push({ name: e.name, schema: e.schema, kind: "page" });
+    out.push({ name: e.name, schema: withTabId(e.schema), kind: "page" });
   }
   for (const [name, t] of Object.entries(BROWSER_TOOLS)) {
     out.push({ name, schema: t.schema, kind: "browser" });

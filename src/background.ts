@@ -11,6 +11,7 @@
 import {
   BROWSER_TOOLS,
   BROWSER_TOOL_NAMES,
+  splitTabId,
   detachAll,
   forgetTab,
   skillIndexForOrigin,
@@ -36,6 +37,17 @@ const MGMT_TOOLS = new Set([
   "remove_site_tool",
 ]);
 
+// Browser tools whose FIRST arg is an optional tab_id — used to surface the right
+// site in the augmentation when the agent targets a specific tab.
+const TAB_FIRST_BROWSER = new Set([
+  "execute_script",
+  "take_screenshot",
+  "navigate",
+  "reload_tab",
+  "go_back",
+  "go_forward",
+]);
+
 /**
  * Augment EVERY operation result (not just skill/tool calls) with the site's
  * origin, a lightweight index of that origin's saved skills (markdown know-how)
@@ -43,9 +55,12 @@ const MGMT_TOOLS = new Set([
  * otherwise work efficiently and record/define one. This nudges the agent to
  * obtain/record site context before operating on a new origin.
  */
-async function attachSiteContext(value: any): Promise<void> {
+async function attachSiteContext(value: any, tabHint?: number | null): Promise<void> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return;
-  if (targetTabId == null) return;
+  // Surface context for the tab the call actually acted on (an explicit tab_id),
+  // falling back to the default target.
+  const originTab = tabHint ?? targetTabId;
+  if (originTab == null) return;
   try {
     // Prefer an origin already in the result (e.g. the just-navigated URL) so we
     // surface the destination site's context, not the pre-navigation page.
@@ -57,7 +72,7 @@ async function attachSiteContext(value: any): Promise<void> {
       /* not a URL */
     }
     if (!origin) {
-      const t = await chrome.tabs.get(targetTabId);
+      const t = await chrome.tabs.get(originTab);
       origin = new URL(t.url).origin;
     }
     // Always expose the origin so the agent can scope site-skill/tool calls to it.
@@ -227,25 +242,38 @@ async function handleCall(method: string, args: any[]): Promise<any> {
   await hydrateShowHighlights(); // restore the overlay setting too
   try {
     let value: any;
+    let actedTab: number | null = null;
     if (BROWSER_TOOL_NAMES.has(method)) {
       value = await BROWSER_TOOLS[method].run(ctx, args || []);
+      // For tab-targeting browser tools, the acted tab is the explicit tab_id (if
+      // any), else the default target — so the augmentation surfaces the right site.
+      if (TAB_FIRST_BROWSER.has(method)) {
+        actedTab = args && typeof args[0] === "number" ? args[0] : targetTabId;
+      }
     } else {
-      let tabId = targetTabId;
+      // Page tool: args[0] is an optional tab_id routing hint (injected into the
+      // catalog schema). Route to it, or the default target; forward the rest.
+      const { tabId: explicitTab, rest } = splitTabId(args || []);
+      let tabId = explicitTab;
       if (tabId == null) {
-        const [a] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-        if (a?.id != null) {
-          ctx.setTarget(a.id); // pin it so we stick to it from now on
-          tabId = a.id;
+        tabId = targetTabId;
+        if (tabId == null) {
+          const [a] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+          if (a?.id != null) {
+            ctx.setTarget(a.id); // pin it so we stick to it from now on
+            tabId = a.id;
+          }
         }
       }
-      if (tabId == null) throw new Error("No target tab — open or activate a tab first");
+      if (tabId == null) throw new Error("No target tab — open or activate a tab first, or pass tab_id");
+      actedTab = tabId;
       await ensureContent(tabId);
-      const res = await chrome.tabs.sendMessage(tabId, { __hyphaPage: true, method, args, showHighlights });
+      const res = await chrome.tabs.sendMessage(tabId, { __hyphaPage: true, method, args: rest, showHighlights });
       if (res && res.__error) throw new Error(res.__error);
       value = res ? res.value : undefined;
     }
     const isErr = value && typeof value === "object" && "error" in value;
-    if (!isErr && !MGMT_TOOLS.has(method)) await attachSiteContext(value);
+    if (!isErr && !MGMT_TOOLS.has(method)) await attachSiteContext(value, actedTab);
     ui({ type: "log", msg: isErr ? `${method}: ${value.error}` : `${method} -> ok`, kind: isErr ? "error" : "result" });
     return value;
   } catch (e: any) {

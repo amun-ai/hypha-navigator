@@ -101,7 +101,8 @@ const CTX = { setTarget() {}, getTarget: () => 7 };
 
 test("take_screenshot (viewport) returns a downscaled CDP capture", async () => {
   installChrome();
-  const r = await mod.BROWSER_TOOLS.take_screenshot.run(CTX, [undefined, "jpeg", 0.6, 800, 800, false]);
+  // args: [tab_id, selector, format, quality, max_width, max_height, full_page]
+  const r = await mod.BROWSER_TOOLS.take_screenshot.run(CTX, [undefined, undefined, "jpeg", 0.6, 800, 800, false]);
   assert.equal(r.base64, "QUJD");
   assert.equal(r.media_type, "image/jpeg");
   assert.equal(r.data_url, "data:image/jpeg;base64,QUJD");
@@ -116,13 +117,13 @@ test("take_screenshot (viewport) returns a downscaled CDP capture", async () => 
 
 test("take_screenshot (selector) clips to the element; missing selector errors", async () => {
   installChrome();
-  const ok = await mod.BROWSER_TOOLS.take_screenshot.run(CTX, ["#hero", "png", undefined, 800, 800, false]);
+  const ok = await mod.BROWSER_TOOLS.take_screenshot.run(CTX, [undefined, "#hero", "png", undefined, 800, 800, false]);
   assert.equal(ok.media_type, "image/png");
   assert.equal(lastCapture.quality, undefined); // png → no quality
   // 200x100 fits within 800 → scale 1 → unchanged
   assert.equal(ok.width, 200);
   assert.equal(ok.height, 100);
 
-  const miss = await mod.BROWSER_TOOLS.take_screenshot.run(CTX, ["#missing", "jpeg", 0.6, 800, 800, false]);
+  const miss = await mod.BROWSER_TOOLS.take_screenshot.run(CTX, [undefined, "#missing", "jpeg", 0.6, 800, 800, false]);
   assert.match(miss.error, /No element found for selector: #missing/);
 });

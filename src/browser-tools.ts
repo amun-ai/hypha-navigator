@@ -261,6 +261,21 @@ async function resolveTarget(ctx: BrowserToolCtx): Promise<number> {
   return active.id;
 }
 
+/** Resolve the tab a call should act on: an explicitly-passed `tab_id` (does NOT
+ *  change the default target), else the default target tab. */
+async function tabFor(ctx: BrowserToolCtx, tabId?: number | null): Promise<number> {
+  return typeof tabId === "number" ? tabId : resolveTarget(ctx);
+}
+
+/** Page-tool args carry an optional leading tab_id (injected into the catalog
+ *  schema as the first property). Split it off so the rest can be forwarded to
+ *  the content script, and so the SW can route to that tab. */
+export function splitTabId(args: any[]): { tabId: number | null; rest: any[] } {
+  if (!Array.isArray(args) || !args.length) return { tabId: null, rest: [] };
+  const [first, ...rest] = args;
+  return { tabId: typeof first === "number" ? first : null, rest };
+}
+
 // ---- per-site skill memory ----------------------------------------------
 // Reusable recipes an agent accumulates per site (origin), persisted in
 // chrome.storage.local. The SW has storage access (the offscreen does not).
@@ -650,15 +665,18 @@ export const BROWSER_TOOLS: Record<string, Tool> = {
     schema: {
       name: "navigate",
       description:
-        "Navigate the current target tab to a URL (full page load) — REUSES the existing tab, so this is the preferred way to move between pages. Use open_tab only when you need a separate tab.",
+        "Navigate a tab to a URL (full page load) — REUSES the tab, so this is the preferred way to move between pages. Acts on the given tab_id, or the default target tab. Use open_tab only when you need a separate tab.",
       parameters: {
         type: "object",
-        properties: { url: { type: "string", description: "URL to navigate to" } },
+        properties: {
+          tab_id: { type: "number", description: "Optional: the tab to navigate (id from open_tab/list_tabs). Omit to use the default target tab." },
+          url: { type: "string", description: "URL to navigate to" },
+        },
         required: ["url"],
       },
     },
-    run: async (ctx, [url]) => {
-      const id = await resolveTarget(ctx);
+    run: async (ctx, [tab_id, url]) => {
+      const id = await tabFor(ctx, tab_id);
       await chrome.tabs.update(id, { url });
       return { success: true, url };
     },
@@ -667,16 +685,17 @@ export const BROWSER_TOOLS: Record<string, Tool> = {
   reload_tab: {
     schema: {
       name: "reload_tab",
-      description: "Reload the target tab.",
+      description: "Reload a tab (the given tab_id, or the default target tab).",
       parameters: {
         type: "object",
         properties: {
+          tab_id: { type: "number", description: "Optional: the tab to reload. Omit to use the default target tab." },
           bypass_cache: { type: "boolean", description: "Hard reload (default false)" },
         },
       },
     },
-    run: async (ctx, [bypass_cache = false]) => {
-      const id = await resolveTarget(ctx);
+    run: async (ctx, [tab_id, bypass_cache = false]) => {
+      const id = await tabFor(ctx, tab_id);
       await chrome.tabs.reload(id, { bypassCache: !!bypass_cache });
       return { success: true };
     },
@@ -685,11 +704,16 @@ export const BROWSER_TOOLS: Record<string, Tool> = {
   go_back: {
     schema: {
       name: "go_back",
-      description: "Go back in the target tab's history.",
-      parameters: { type: "object", properties: {} },
+      description: "Go back in a tab's history (the given tab_id, or the default target tab).",
+      parameters: {
+        type: "object",
+        properties: {
+          tab_id: { type: "number", description: "Optional: the tab to act on. Omit to use the default target tab." },
+        },
+      },
     },
-    run: async (ctx) => {
-      await chrome.tabs.goBack(await resolveTarget(ctx));
+    run: async (ctx, [tab_id]) => {
+      await chrome.tabs.goBack(await tabFor(ctx, tab_id));
       return { success: true };
     },
   },
@@ -697,11 +721,16 @@ export const BROWSER_TOOLS: Record<string, Tool> = {
   go_forward: {
     schema: {
       name: "go_forward",
-      description: "Go forward in the target tab's history.",
-      parameters: { type: "object", properties: {} },
+      description: "Go forward in a tab's history (the given tab_id, or the default target tab).",
+      parameters: {
+        type: "object",
+        properties: {
+          tab_id: { type: "number", description: "Optional: the tab to act on. Omit to use the default target tab." },
+        },
+      },
     },
-    run: async (ctx) => {
-      await chrome.tabs.goForward(await resolveTarget(ctx));
+    run: async (ctx, [tab_id]) => {
+      await chrome.tabs.goForward(await tabFor(ctx, tab_id));
       return { success: true };
     },
   },
@@ -710,24 +739,28 @@ export const BROWSER_TOOLS: Record<string, Tool> = {
     schema: {
       name: "execute_script",
       description:
-        "Run arbitrary JavaScript in the target tab's page context and return the result. Uses the Chrome debugger (Page.setBypassCSP), so it works even on strict-CSP pages that block 'unsafe-eval'. The last expression is auto-returned; async code is awaited. Attaching shows Chrome's 'debugging this browser' banner. On a runtime error it returns { error, name, stack, line, column } — the full message and stack trace, so you can debug and fix the script.",
+        "Run arbitrary JavaScript in a tab's page context and return the result. Acts on the given tab_id, or the default target tab. Uses the Chrome debugger (Page.setBypassCSP), so it works even on strict-CSP pages that block 'unsafe-eval'. The last expression is auto-returned; async code is awaited. Attaching shows Chrome's 'debugging this browser' banner. On a runtime error it returns { error, name, stack, line, column } — the full message and stack trace, so you can debug and fix the script.",
       parameters: {
         type: "object",
-        properties: { code: { type: "string", description: "JavaScript to execute" } },
+        properties: {
+          tab_id: { type: "number", description: "Optional: the tab to run in (id from open_tab/list_tabs). Omit to use the default target tab. Pass it to run in a specific tab (e.g. several agents each on their own tab)." },
+          code: { type: "string", description: "JavaScript to execute" },
+        },
         required: ["code"],
       },
     },
-    run: async (ctx, [code]) => cdpEval(await resolveTarget(ctx), String(code ?? "")),
+    run: async (ctx, [tab_id, code]) => cdpEval(await tabFor(ctx, tab_id), String(code ?? "")),
   },
 
   take_screenshot: {
     schema: {
       name: "take_screenshot",
       description:
-        "Capture a screenshot of the target tab via the Chrome debugger (Page.captureScreenshot) — works reliably even when the tab is NOT in the foreground (unlike DOM-rasterizing approaches that stall on background tabs). Capture the viewport, a specific element (selector), or the full page. Downscaled to fit max_width × max_height (default 800px) and JPEG-encoded at quality 0.6 by default. Returns { base64, media_type, data_url, format, width, height, size_kb }. Use `base64` (raw, no prefix) directly with Claude/GPT image content fields; `data_url` for HTML <img src=...> previews. On failure returns { error }.",
+        "Capture a screenshot of a tab via the Chrome debugger (Page.captureScreenshot) — works reliably even when the tab is NOT in the foreground (unlike DOM-rasterizing approaches that stall on background tabs). Acts on the given tab_id, or the default target tab. Capture the viewport, a specific element (selector), or the full page. Downscaled to fit max_width × max_height (default 800px) and JPEG-encoded at quality 0.6 by default. Returns { base64, media_type, data_url, format, width, height, size_kb }. Use `base64` (raw, no prefix) directly with Claude/GPT image content fields; `data_url` for HTML <img src=...> previews. On failure returns { error }.",
       parameters: {
         type: "object",
         properties: {
+          tab_id: { type: "number", description: "Optional: the tab to capture (id from open_tab/list_tabs). Omit to use the default target tab." },
           selector: { type: "string", description: "CSS selector of the element to capture. Omit for the viewport (or full page if full_page=true)." },
           format: { type: "string", enum: ["png", "jpeg"], description: "Image format. Default: jpeg (smaller). Use png only when sharp text matters." },
           quality: { type: "number", description: "JPEG quality 0–1. Default 0.6. Ignored for PNG." },
@@ -737,8 +770,8 @@ export const BROWSER_TOOLS: Record<string, Tool> = {
         },
       },
     },
-    run: async (ctx, [selector, format, quality, max_width, max_height, full_page]) =>
-      cdpScreenshot(await resolveTarget(ctx), { selector, format, quality, max_width, max_height, full_page }),
+    run: async (ctx, [tab_id, selector, format, quality, max_width, max_height, full_page]) =>
+      cdpScreenshot(await tabFor(ctx, tab_id), { selector, format, quality, max_width, max_height, full_page }),
   },
 
   // ---- skill memory (accumulate per-origin know-how across sessions) ------

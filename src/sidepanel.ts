@@ -27,6 +27,12 @@ const logsEl = $("logs");
 let status = "disconnected";
 let serviceUrl = "";
 
+// The URL we show/copy by default is the self-documenting get_skill_md endpoint —
+// that's the single URL you hand an agent (it contains the base URL + every tool).
+function skillUrl(): string {
+  return serviceUrl ? `${serviceUrl}/get_skill_md` : "";
+}
+
 function render(): void {
   dot.className = "dot " + status;
   const connected = status === "connected";
@@ -34,7 +40,7 @@ function render(): void {
   disconnectBtn.disabled = !connected && status !== "connecting";
   connectBtn.textContent = connected ? "Connected" : "Connect browser";
   urlBox.className = "url" + (serviceUrl ? " show" : "");
-  urlCode.textContent = serviceUrl;
+  urlCode.textContent = skillUrl();
 }
 
 function appendLog(msg: string, kind: string): void {
@@ -116,7 +122,7 @@ function flashCopied(btn: HTMLButtonElement): void {
 }
 $("copyUrl").addEventListener("click", async () => {
   if (!serviceUrl) return;
-  await navigator.clipboard.writeText(serviceUrl);
+  await navigator.clipboard.writeText(skillUrl());
   flashCopied($("copyUrl") as HTMLButtonElement);
 });
 $("copySkill").addEventListener("click", async () => {

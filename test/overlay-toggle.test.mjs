@@ -35,7 +35,7 @@ test("SW caches the setting, passes it per page-call, and clears the overlay whe
   const src = read("src/background.ts");
   assert.match(src, /let showHighlights = false/);
   assert.match(src, /hydrateShowHighlights/);
-  assert.match(src, /__hyphaPage: true, method, args, showHighlights/, "must pass the flag to the content script");
+  assert.match(src, /__hyphaPage: true, method, args: rest, showHighlights/, "must pass the flag to the content script");
   // toggling off clears any overlay already on the page
   assert.match(src, /if \(!showHighlights\) void clearHighlightsOnTarget\(\)/);
   assert.match(src, /method: "remove_highlights"/);
