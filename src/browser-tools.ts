@@ -50,7 +50,7 @@ export function forgetTab(tabId: number): void {
   attached.delete(tabId);
 }
 
-async function cdpEval(tabId: number, code: string): Promise<any> {
+async function cdpEval(tabId: number, code: string, argsObj?: any): Promise<any> {
   try {
     await ensureAttached(tabId);
   } catch (e: any) {
@@ -61,7 +61,10 @@ async function cdpEval(tabId: number, code: string): Promise<any> {
         " (restricted page like chrome:// or the Web Store, or another debugger is already attached).",
     };
   }
-  const expression = `(async () => { ${autoReturn(code)} })()`;
+  // call_site_tool injects the call arguments as an `args` object in scope; plain
+  // execute_script passes none (preamble empty → identical behavior to before).
+  const preamble = argsObj !== undefined ? `const args = ${JSON.stringify(argsObj)};\n` : "";
+  const expression = `${preamble}(async () => { ${autoReturn(code)} })()`;
   const res: any = await chrome.debugger.sendCommand({ tabId }, "Runtime.evaluate", {
     expression,
     returnByValue: true,
@@ -185,89 +188,107 @@ async function saveAllSkills(all: SkillStore): Promise<void> {
 // .sync is account-backed and survives reinstall (when the user is signed in to
 // Chrome). We keep local as the working store and mirror it into sync, chunked
 // to respect sync's ~8KB-per-item limit (~100KB total).
-const SYNC_META = "hyphaSkillsMeta";
-const SYNC_PREFIX = "hyphaSkillsChunk";
+// The SAME chunked-mirror machinery backs both per-origin stores (site skills +
+// site tools). A SyncStore describes one store's keys and its over-quota
+// "strip the heavy body, keep the signature" fallback.
 const SYNC_CHUNK = 7000;
+interface SyncStore {
+  localKey: string; // chrome.storage.local key (the working store)
+  syncMeta: string; // chrome.storage.sync meta key
+  syncPrefix: string; // chrome.storage.sync chunk-key prefix
+  label: string; // for log messages
+  stripBody: (all: any) => any; // over-quota: keep catalog/signature, drop body
+}
 
-async function writeSyncChunks(obj: any, partial: boolean): Promise<void> {
+const SKILLS_STORE: SyncStore = {
+  localKey: SKILLS_KEY,
+  syncMeta: "hyphaSkillsMeta",
+  syncPrefix: "hyphaSkillsChunk",
+  label: "site skills",
+  stripBody: (all) => {
+    const out: SkillStore = {};
+    for (const [o, site] of Object.entries(all || {})) {
+      out[o] = {};
+      for (const [n, e] of Object.entries(site as any))
+        out[o][n] = { description: normEntry(e as any).description, content: "" };
+    }
+    return out;
+  },
+};
+
+async function writeSyncChunks(store: SyncStore, obj: any, partial: boolean): Promise<void> {
   const json = JSON.stringify(obj || {});
   const chunks: string[] = [];
   for (let i = 0; i < json.length; i += SYNC_CHUNK) chunks.push(json.slice(i, i + SYNC_CHUNK));
-  const prev = (await chrome.storage.sync.get(SYNC_META))[SYNC_META];
+  const prev = (await chrome.storage.sync.get(store.syncMeta))[store.syncMeta];
   const prevN = prev?.chunks || 0;
-  const set: any = { [SYNC_META]: { chunks: chunks.length, partial } };
-  chunks.forEach((c, i) => (set[SYNC_PREFIX + i] = c));
+  const set: any = { [store.syncMeta]: { chunks: chunks.length, partial } };
+  chunks.forEach((c, i) => (set[store.syncPrefix + i] = c));
   await chrome.storage.sync.set(set);
   if (prevN > chunks.length) {
     const rm: string[] = [];
-    for (let i = chunks.length; i < prevN; i++) rm.push(SYNC_PREFIX + i);
+    for (let i = chunks.length; i < prevN; i++) rm.push(store.syncPrefix + i);
     await chrome.storage.sync.remove(rm);
   }
 }
 
-/** Catalog-only view: keep each skill's name + description, drop the body. */
-function catalogOnly(all: SkillStore): SkillStore {
-  const out: SkillStore = {};
-  for (const [o, site] of Object.entries(all || {})) {
-    out[o] = {};
-    for (const [n, e] of Object.entries(site)) out[o][n] = { description: normEntry(e).description, content: "" };
-  }
-  return out;
-}
-
 /**
- * Mirror the skill store into chrome.storage.sync (best-effort, account-backed so
- * it survives reinstall). Full SKILL.md bodies can exceed sync's ~100KB quota; if
- * so, fall back to backing up the catalog (names + descriptions) only — the full
- * content stays in local (unlimitedStorage) and is portable via Export/Import.
+ * Mirror a per-origin store into chrome.storage.sync (best-effort, account-backed
+ * so it survives reinstall). Full bodies can exceed sync's ~100KB quota; if so,
+ * fall back to backing up the catalog (signatures) only — the full content stays
+ * in local (unlimitedStorage) and is portable via Export/Import.
  */
-export async function mirrorSkillsToSync(all: SkillStore): Promise<void> {
+async function mirrorStoreToSync(store: SyncStore, all: any): Promise<void> {
   if (!chrome.storage?.sync) return;
   try {
-    await writeSyncChunks(all || {}, false);
+    await writeSyncChunks(store, all || {}, false);
   } catch {
     try {
-      await writeSyncChunks(catalogOnly(all || {}), true);
+      await writeSyncChunks(store, store.stripBody(all || {}), true);
       console.warn(
-        "[hypha] site skills exceed Chrome sync quota — backed up the catalog (names + descriptions) only. Use Export in the side panel for a full backup.",
+        `[hypha] ${store.label} exceed Chrome sync quota — backed up the catalog (signatures) only. Use Export in the side panel for a full backup.`,
       );
     } catch (e2) {
-      console.warn("[hypha] skill sync mirror failed:", e2);
+      console.warn(`[hypha] ${store.label} sync mirror failed:`, e2);
     }
   }
 }
 
-async function readSkillsFromSync(): Promise<SkillStore | null> {
+async function readStoreFromSync(store: SyncStore): Promise<any | null> {
   if (!chrome.storage?.sync) return null;
   try {
-    const meta = (await chrome.storage.sync.get(SYNC_META))[SYNC_META];
+    const meta = (await chrome.storage.sync.get(store.syncMeta))[store.syncMeta];
     if (!meta?.chunks) return null;
-    const keys = Array.from({ length: meta.chunks }, (_, i) => SYNC_PREFIX + i);
+    const keys = Array.from({ length: meta.chunks }, (_, i) => store.syncPrefix + i);
     const got = await chrome.storage.sync.get(keys);
     let json = "";
-    for (let i = 0; i < meta.chunks; i++) json += got[SYNC_PREFIX + i] || "";
+    for (let i = 0; i < meta.chunks; i++) json += got[store.syncPrefix + i] || "";
     return JSON.parse(json);
   } catch (e) {
-    console.warn("[hypha] skill sync read failed:", e);
+    console.warn(`[hypha] ${store.label} sync read failed:`, e);
     return null;
   }
 }
 
-/** On (re)install/startup: if local skills are empty but sync has a backup,
+/** On (re)install/startup: if the local store is empty but sync has a backup,
  *  restore it. Safe to call repeatedly. */
-export async function hydrateSkillsFromSync(): Promise<void> {
+async function hydrateStoreFromSync(store: SyncStore): Promise<void> {
   try {
-    const local = await loadAllSkills();
+    const local = (await chrome.storage.local.get(store.localKey))[store.localKey] || {};
     if (Object.keys(local).length) return;
-    const synced = await readSkillsFromSync();
+    const synced = await readStoreFromSync(store);
     if (synced && Object.keys(synced).length) {
-      await chrome.storage.local.set({ [SKILLS_KEY]: synced });
-      console.log("[hypha] restored site skills from sync backup");
+      await chrome.storage.local.set({ [store.localKey]: synced });
+      console.log(`[hypha] restored ${store.label} from sync backup`);
     }
   } catch (e) {
-    console.warn("[hypha] skill hydrate failed:", e);
+    console.warn(`[hypha] ${store.label} hydrate failed:`, e);
   }
 }
+
+// Skills durability wrappers (the SW wires these to storage.onChanged + startup).
+export const mirrorSkillsToSync = (all: SkillStore) => mirrorStoreToSync(SKILLS_STORE, all);
+export const hydrateSkillsFromSync = () => hydrateStoreFromSync(SKILLS_STORE);
 /** Resolve the origin to scope a skill to: the explicitly-passed origin, else
  *  the current target tab's origin. Skills are always bound to an origin. */
 async function siteFor(ctx: BrowserToolCtx, explicit?: string): Promise<string> {
@@ -286,6 +307,112 @@ export async function skillIndexForOrigin(
     name,
     description: normEntry(e).description,
   }));
+}
+
+// ---- per-site TOOLS (named, parameterized, callable scripts) -------------
+// A site tool is a reusable JS recipe the agent defines once and CALLS by name
+// with args, instead of re-sending a full execute_script every time. Stored per
+// origin alongside (but separate from) site skills, with the same durability.
+const TOOLS_KEY = "hyphaSiteTools";
+type ToolParam = {
+  name: string;
+  type?: string;
+  description?: string;
+  required?: boolean;
+  default?: any;
+};
+type ToolEntry = { description: string; params: ToolParam[]; code: string };
+// origin -> name -> entry
+type ToolStore = Record<string, Record<string, ToolEntry>>;
+
+/** Normalize a stored tool entry to a complete, well-typed shape. */
+function normTool(e: any): ToolEntry {
+  return {
+    description: typeof e?.description === "string" ? e.description : "",
+    params: normParams(e?.params),
+    code: typeof e?.code === "string" ? e.code : "",
+  };
+}
+
+/** Coerce params to an array of {name, type?, description?, required?, default?};
+ *  drop entries without a usable name. */
+function normParams(params: any): ToolParam[] {
+  if (!Array.isArray(params)) return [];
+  const out: ToolParam[] = [];
+  for (const p of params) {
+    if (!p || typeof p !== "object") continue;
+    const name = String(p.name ?? "").trim();
+    if (!name) continue;
+    const param: ToolParam = { name };
+    if (typeof p.type === "string") param.type = p.type;
+    if (typeof p.description === "string") param.description = p.description;
+    if (p.required) param.required = true;
+    if ("default" in p) param.default = p.default;
+    out.push(param);
+  }
+  return out;
+}
+
+async function loadAllTools(): Promise<ToolStore> {
+  const r = await chrome.storage.local.get(TOOLS_KEY);
+  return r[TOOLS_KEY] || {};
+}
+async function saveAllTools(all: ToolStore): Promise<void> {
+  await chrome.storage.local.set({ [TOOLS_KEY]: all });
+}
+
+const TOOLS_STORE: SyncStore = {
+  localKey: TOOLS_KEY,
+  syncMeta: "hyphaToolsMeta",
+  syncPrefix: "hyphaToolsChunk",
+  label: "site tools",
+  stripBody: (all) => {
+    const out: ToolStore = {};
+    for (const [o, site] of Object.entries(all || {})) {
+      out[o] = {};
+      for (const [n, e] of Object.entries(site as any)) {
+        const t = normTool(e);
+        out[o][n] = { description: t.description, params: t.params, code: "" };
+      }
+    }
+    return out;
+  },
+};
+// Tools durability wrappers (wired by the SW, exactly like the skills ones).
+export const mirrorToolsToSync = (all: ToolStore) => mirrorStoreToSync(TOOLS_STORE, all);
+export const hydrateToolsFromSync = () => hydrateStoreFromSync(TOOLS_STORE);
+
+/** A lightweight SIGNATURE index of an origin's tools (name + description +
+ *  params), auto-surfaced on operation results — never includes the code body. */
+export async function toolIndexForOrigin(
+  origin: string,
+): Promise<{ name: string; description: string; params: ToolParam[] }[]> {
+  const site = (await loadAllTools())[origin] || {};
+  return Object.entries(site).map(([name, e]) => {
+    const t = normTool(e);
+    return { name, description: t.description, params: t.params };
+  });
+}
+
+/** Validate call args against a tool's params: ensure required ones are present,
+ *  apply defaults for missing optional ones. Extra args pass through (flexible). */
+function buildCallArgs(
+  params: ToolParam[],
+  args: any,
+): { ok: true; args: Record<string, any> } | { ok: false; error: string } {
+  const provided = args && typeof args === "object" && !Array.isArray(args) ? args : {};
+  const out: Record<string, any> = { ...provided };
+  const missing: string[] = [];
+  for (const p of params) {
+    if (out[p.name] === undefined) {
+      if ("default" in p) out[p.name] = p.default;
+      else if (p.required) missing.push(p.name);
+    }
+  }
+  if (missing.length) {
+    return { ok: false, error: `Missing required argument(s): ${missing.join(", ")}.` };
+  }
+  return { ok: true, args: out };
 }
 
 export const BROWSER_TOOLS: Record<string, Tool> = {
@@ -597,6 +724,197 @@ export const BROWSER_TOOLS: Record<string, Tool> = {
       if (all[o]) delete all[o][String(name)];
       await saveAllSkills(all);
       return { success: true, origin: o, name, removed: had };
+    },
+  },
+
+  // ---- site tools (named, parameterized, CALLABLE scripts per origin) -----
+  // Define a recipe once with set_site_tool, then call_site_tool(origin, name,
+  // args) instead of re-sending execute_script. Tools are mutated by saving over
+  // the same name. Separate store from skills (markdown know-how), both per-origin.
+  list_site_tools: {
+    schema: {
+      name: "list_site_tools",
+      description:
+        "List saved site tools grouped BY SITE ORIGIN. A site tool is a named, parameterized JS recipe you can CALL by name with args (via call_site_tool) instead of re-sending execute_script. Returns each tool's NAME, DESCRIPTION and PARAMS signature (not the code body) — read the code with get_site_tool(origin, name). With no argument, returns every origin. Pass `origin` to list just that site's. Call this FIRST on a site so you reuse tools instead of rewriting scripts.",
+      parameters: {
+        type: "object",
+        properties: {
+          origin: {
+            type: "string",
+            description:
+              "Site origin, e.g. https://example.com (from tab/browser info). Omit to list all origins.",
+          },
+        },
+      },
+    },
+    run: async (_ctx, [origin]) => {
+      const all = await loadAllTools();
+      const sigOf = (o: string) =>
+        Object.entries(all[o] || {}).map(([name, e]) => {
+          const t = normTool(e);
+          return { name, description: t.description, params: t.params };
+        });
+      if (origin) {
+        const tools = sigOf(String(origin));
+        return { origin: String(origin), tools, count: tools.length };
+      }
+      const sites: Record<string, ReturnType<typeof sigOf>> = {};
+      for (const o of Object.keys(all)) sites[o] = sigOf(o);
+      return { sites, site_count: Object.keys(sites).length };
+    },
+  },
+
+  get_site_tool: {
+    schema: {
+      name: "get_site_tool",
+      description:
+        "Read one saved site tool — returns its description, params signature, and the full code body. Pass the site `origin` and the tool `name` (both from list_site_tools). Read before updating so you extend rather than overwrite it.",
+      parameters: {
+        type: "object",
+        properties: {
+          origin: { type: "string", description: "Site origin, e.g. https://example.com" },
+          name: { type: "string", description: "Tool name (the key from list_site_tools)" },
+        },
+        required: ["origin", "name"],
+      },
+    },
+    run: async (ctx, [origin, name]) => {
+      const o = await siteFor(ctx, origin);
+      const site = (await loadAllTools())[o] || {};
+      const raw = site[String(name)];
+      if (raw == null) {
+        const available = Object.keys(site);
+        return {
+          origin: o,
+          name,
+          found: false,
+          available,
+          hint: available.length
+            ? `No tool named '${name}' for ${o}. Available: ${available.join(", ")}.`
+            : `No tools saved for ${o} yet. Define one with set_site_tool(origin, name, description, params, code).`,
+        };
+      }
+      const t = normTool(raw);
+      return { origin: o, name, found: true, description: t.description, params: t.params, code: t.code };
+    },
+  },
+
+  set_site_tool: {
+    schema: {
+      name: "set_site_tool",
+      description:
+        "Save or update a site tool BOUND TO A SITE ORIGIN: a named, parameterized JS recipe you can later CALL by name. Provide: `name` — 1-64 chars, lowercase letters/numbers/hyphens (e.g. 'search', 'export-report'); `description` — one line (what it does / when to use); `params` — an array of parameter specs `{name, type?, description?, required?, default?}` describing the call arguments; `code` — the JS body to run, with an `args` object IN SCOPE (the call arguments) and whose LAST EXPRESSION is auto-returned (async/await supported, e.g. `await fetch(...)`). Pass `origin` (from tab/browser info); defaults to the current target tab. Saving over the same name mutates the tool. Then run it with call_site_tool(origin, name, args).",
+      parameters: {
+        type: "object",
+        properties: {
+          origin: {
+            type: "string",
+            description: "Site origin to bind this tool to. Defaults to the current tab's origin.",
+          },
+          name: { type: "string", description: "Tool name / key: 1-64 chars, lowercase a-z, 0-9, hyphens" },
+          description: { type: "string", description: "One line: what the tool does and when to use it" },
+          params: {
+            type: "array",
+            description:
+              "Parameter specs: array of {name, type?, description?, required?, default?}. These become the `args` keys at call time.",
+          },
+          code: {
+            type: "string",
+            description:
+              "JS body to execute. The call arguments are available as `args` (an object). The last expression is auto-returned; async/await is supported.",
+          },
+        },
+        required: ["name", "description", "code"],
+      },
+    },
+    run: async (ctx, [origin, name, description, params, code]) => {
+      const o = await siteFor(ctx, origin);
+      const nm = normName(name);
+      if (!nm) {
+        return {
+          success: false,
+          error:
+            "Invalid tool name. Use 1-64 chars: lowercase letters, numbers and single hyphens, e.g. 'export-report'.",
+        };
+      }
+      const desc = String(description ?? "").replace(/\r?\n/g, " ").trim().slice(0, 1024);
+      if (!desc) return { success: false, error: "A non-empty `description` is required (≤1024 chars)." };
+      const body = String(code ?? "");
+      if (!body.trim()) return { success: false, error: "A non-empty `code` body is required." };
+      const all = await loadAllTools();
+      all[o] = all[o] || {};
+      const renamed = nm !== String(name);
+      all[o][nm] = { description: desc, params: normParams(params), code: body };
+      await saveAllTools(all);
+      return {
+        success: true,
+        origin: o,
+        name: nm,
+        params: all[o][nm].params,
+        ...(renamed ? { note: `name normalized to '${nm}' (naming rules)` } : {}),
+        count: Object.keys(all[o]).length,
+      };
+    },
+  },
+
+  remove_site_tool: {
+    schema: {
+      name: "remove_site_tool",
+      description:
+        "Delete an outdated site tool. Pass the site `origin` (from tab/browser info) and the tool `name`.",
+      parameters: {
+        type: "object",
+        properties: {
+          origin: { type: "string", description: "Site origin the tool is bound to" },
+          name: { type: "string", description: "Tool name to delete" },
+        },
+        required: ["origin", "name"],
+      },
+    },
+    run: async (ctx, [origin, name]) => {
+      const o = await siteFor(ctx, origin);
+      const all = await loadAllTools();
+      const had = !!(all[o] && String(name) in all[o]);
+      if (all[o]) delete all[o][String(name)];
+      await saveAllTools(all);
+      return { success: true, origin: o, name, removed: had };
+    },
+  },
+
+  call_site_tool: {
+    schema: {
+      name: "call_site_tool",
+      description:
+        "CALL a saved site tool by name with arguments — the fast path: runs the tool's stored code (no script re-sent), with your `args` injected in scope, on the current target tab. Validates required params and applies defaults. Pass the site `origin` (from tab/browser info; defaults to the current tab), the tool `name`, and `args` (an object of argument name→value). Returns {result, type} like execute_script, or {error}.",
+      parameters: {
+        type: "object",
+        properties: {
+          origin: { type: "string", description: "Site origin the tool is bound to. Defaults to the current tab's origin." },
+          name: { type: "string", description: "Tool name to call (from list_site_tools)" },
+          args: {
+            type: "object",
+            description: "Arguments object passed to the tool as `args` (keys are the tool's param names).",
+          },
+        },
+        required: ["name"],
+      },
+    },
+    run: async (ctx, [origin, name, args]) => {
+      const o = await siteFor(ctx, origin);
+      const site = (await loadAllTools())[o] || {};
+      const raw = site[String(name)];
+      if (raw == null) {
+        const available = Object.keys(site);
+        return {
+          error: available.length
+            ? `No tool named '${name}' for ${o}. Available: ${available.join(", ")}. Use list_site_tools(origin).`
+            : `No tools saved for ${o} yet. Define one with set_site_tool(origin, name, description, params, code).`,
+        };
+      }
+      const t = normTool(raw);
+      const built = buildCallArgs(t.params, args);
+      if (!built.ok) return { error: built.error };
+      return cdpEval(await resolveTarget(ctx), t.code, built.args);
     },
   },
 };

@@ -14,32 +14,41 @@ import {
   detachAll,
   forgetTab,
   skillIndexForOrigin,
+  toolIndexForOrigin,
   hydrateSkillsFromSync,
   mirrorSkillsToSync,
+  hydrateToolsFromSync,
+  mirrorToolsToSync,
   type BrowserToolCtx,
 } from "./browser-tools.js";
 
-// The skill-management tools themselves — their results already concern skills,
-// so we don't re-augment them (avoids confusing nested skill hints).
-const SKILL_MGMT = new Set([
+// The skill/tool MANAGEMENT tools — their results already concern skills/tools,
+// so we don't re-augment them (avoids confusing nested hints). call_site_tool is
+// NOT here: it's a real operation (like execute_script) and gets augmented.
+const MGMT_TOOLS = new Set([
   "list_site_skills",
   "get_site_skill",
   "set_site_skill",
   "remove_site_skill",
+  "list_site_tools",
+  "get_site_tool",
+  "set_site_tool",
+  "remove_site_tool",
 ]);
 
 /**
- * Augment EVERY operation result (not just skill calls) with the site's origin,
- * a lightweight name+description index of that origin's saved skills, and a hint:
- * reuse them if any exist, otherwise work efficiently and record one. This nudges
- * the agent to obtain/record site skills before operating on a new origin.
+ * Augment EVERY operation result (not just skill/tool calls) with the site's
+ * origin, a lightweight index of that origin's saved skills (markdown know-how)
+ * AND tools (callable scripts), each with a hint: reuse them if any exist,
+ * otherwise work efficiently and record/define one. This nudges the agent to
+ * obtain/record site context before operating on a new origin.
  */
-async function attachSiteSkills(value: any): Promise<void> {
+async function attachSiteContext(value: any): Promise<void> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return;
   if (targetTabId == null) return;
   try {
     // Prefer an origin already in the result (e.g. the just-navigated URL) so we
-    // surface the destination site's skills, not the pre-navigation page.
+    // surface the destination site's context, not the pre-navigation page.
     let origin = "";
     const cand = value.origin || value.url || value.tab?.url;
     try {
@@ -51,19 +60,38 @@ async function attachSiteSkills(value: any): Promise<void> {
       const t = await chrome.tabs.get(targetTabId);
       origin = new URL(t.url).origin;
     }
-    // Always expose the origin so the agent can scope site-skill calls to it.
+    // Always expose the origin so the agent can scope site-skill/tool calls to it.
     value.origin = origin;
-    const index = await skillIndexForOrigin(origin); // [{name, description}]
-    value.site_skills = index;
-    if (index.length) {
+
+    // --- site skills (markdown know-how) ---
+    const skills = await skillIndexForOrigin(origin); // [{name, description}]
+    value.site_skills = skills;
+    if (skills.length) {
       value.site_skills_hint =
-        `${index.length} saved skill(s) for ${origin}: ${index.map((s) => s.name).join(", ")}. ` +
+        `${skills.length} saved skill(s) for ${origin}: ${skills.map((s) => s.name).join(", ")}. ` +
         "REUSE these before exploring — read a full entry with get_site_skill(origin, name); refine with set_site_skill(origin, name, description, content).";
     } else {
       value.site_skills_hint =
         `No site skills saved for ${origin} yet. Explore once, then work efficiently ` +
         "(prefer execute_script with the site's own APIs, and batch operations), and " +
         "capture what you learn with set_site_skill(origin, name, description, content) so next time on this site is faster and cheaper.";
+    }
+
+    // --- site tools (callable parameterized scripts) ---
+    const tools = await toolIndexForOrigin(origin); // [{name, description, params}]
+    value.site_tools = tools;
+    if (tools.length) {
+      const sig = tools
+        .map((t) => `${t.name}(${(t.params || []).map((p) => p.name).join(", ")})`)
+        .join(", ");
+      value.site_tools_hint =
+        `${tools.length} callable tool(s) for ${origin}: ${sig}. ` +
+        "Prefer call_site_tool(origin, name, args) over re-sending execute_script; read code with get_site_tool, change it with set_site_tool.";
+    } else {
+      value.site_tools_hint =
+        `No site tools defined for ${origin} yet. When you work out a reusable operation, ` +
+        "save it as a callable tool with set_site_tool(origin, name, description, params, code) and " +
+        "invoke it later with call_site_tool(origin, name, args) instead of resending the script.";
     }
   } catch {
     /* ignore */
@@ -191,7 +219,7 @@ async function handleCall(method: string, args: any[]): Promise<any> {
       value = res ? res.value : undefined;
     }
     const isErr = value && typeof value === "object" && "error" in value;
-    if (!isErr && !SKILL_MGMT.has(method)) await attachSiteSkills(value);
+    if (!isErr && !MGMT_TOOLS.has(method)) await attachSiteContext(value);
     ui({ type: "log", msg: isErr ? `${method}: ${value.error}` : `${method} -> ok`, kind: isErr ? "error" : "result" });
     return value;
   } catch (e: any) {
@@ -350,12 +378,12 @@ chrome.debugger?.onDetach?.addListener((source: any) => {
   if (source?.tabId != null) forgetTab(source.tabId);
 });
 
-// Site skills durability: local storage is wiped on uninstall, so mirror any
-// local change into account-synced storage, and restore from it on (re)install.
+// Site skills/tools durability: local storage is wiped on uninstall, so mirror
+// any local change into account-synced storage, and restore on (re)install.
 chrome.storage?.onChanged?.addListener((changes: any, area: string) => {
-  if (area === "local" && changes.hyphaSiteSkills) {
-    void mirrorSkillsToSync(changes.hyphaSiteSkills.newValue || {});
-  }
+  if (area !== "local") return;
+  if (changes.hyphaSiteSkills) void mirrorSkillsToSync(changes.hyphaSiteSkills.newValue || {});
+  if (changes.hyphaSiteTools) void mirrorToolsToSync(changes.hyphaSiteTools.newValue || {});
 });
 
 chrome.sidePanel?.setPanelBehavior?.({ openPanelOnActionClick: true }).catch(() => {});
@@ -368,10 +396,13 @@ chrome.alarms?.onAlarm?.addListener((a: any) => {
 chrome.runtime.onStartup?.addListener(() => {
   void reconcile();
   void hydrateSkillsFromSync();
+  void hydrateToolsFromSync();
 });
 chrome.runtime.onInstalled?.addListener(() => {
   void reconcile();
   void hydrateSkillsFromSync(); // restore skills after a reinstall
+  void hydrateToolsFromSync(); // restore tools after a reinstall
 });
 void reconcile();
 void hydrateSkillsFromSync();
+void hydrateToolsFromSync();
