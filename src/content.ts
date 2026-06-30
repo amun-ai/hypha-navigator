@@ -9,6 +9,7 @@
  * so we call the raw service functions directly.
  */
 import { createServiceMap } from "./shared/relay/service-map.js";
+import { setHighlightEnabled } from "./shared/services/page-controller.js";
 
 const FLAG = "__HYPHA_DEBUGGER_AGENT__";
 
@@ -43,6 +44,8 @@ function callMainWorldReact(selector?: string, depth?: number): Promise<any> {
     if (!msg || !msg.__hyphaPage) return;
     (async () => {
       try {
+        // The SW tells us whether the user wants the numbered overlay drawn.
+        if (typeof msg.showHighlights === "boolean") setHighlightEnabled(msg.showHighlights);
         const args = msg.args || [];
         let value: any;
         if (msg.method === "get_react_tree") {

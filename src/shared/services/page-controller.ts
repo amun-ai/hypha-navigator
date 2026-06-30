@@ -11,6 +11,15 @@ import { PageController } from "../page-controller/index.js";
 // Singleton — shared across all service calls
 let controller: PageController | null = null;
 
+// Whether get_browser_state draws the on-page numbered overlay. The overlay is a
+// human visual aid (the agent reads indices from the TEXT output, not the
+// drawing), and it can linger on the page and get in the user's way — so it is
+// OFF by default and toggled from the side panel ("Show element overlay").
+let highlightEnabled = false;
+export function setHighlightEnabled(on: boolean): void {
+  highlightEnabled = !!on;
+}
+
 function getController(): PageController {
   if (!controller) {
     controller = new PageController({
@@ -39,6 +48,8 @@ export async function getBrowserState(
   element_count: number;
 }> {
   const ctrl = getController();
+  // Draw the on-page numbered overlay only when the user has it enabled.
+  (ctrl as any).config.doHighlightElements = highlightEnabled;
   if (viewport_only !== undefined) {
     (ctrl as any).config.viewportExpansion = viewport_only ? 0 : -1;
   }

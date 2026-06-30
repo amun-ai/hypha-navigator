@@ -101,6 +101,9 @@
       <label class="row" id="bgModeRow" style="font-size:11px;color:var(--muted);cursor:pointer;" title="When on, the agent never brings tabs to the front or focuses windows — it works in the background target tab so you're never interrupted. The Focus button still works as a manual override.">
         <input type="checkbox" id="forceBackground" /> Work in background (don't steal focus)
       </label>
+      <label class="row" id="highlightRow" style="font-size:11px;color:var(--muted);cursor:pointer;" title="Draw a numbered overlay on the page marking the interactive elements the agent sees (from get_browser_state). Off by default — the agent reads element indices from text regardless; the overlay is just a visual aid and can get in your way. Turning it off clears any overlay already on the page.">
+        <input type="checkbox" id="showHighlights" /> Show element overlay (numbered highlights)
+      </label>
       <details>
         <summary>Advanced</summary>
         <div class="row">

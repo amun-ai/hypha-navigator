@@ -144,6 +144,13 @@ bgToggle.addEventListener("change", () => {
   chrome.storage.local.set({ hyphaForceBackground: bgToggle.checked });
 });
 
+// "Show element overlay" — persist so the SW passes it to the content script.
+// Turning it off makes the SW clear any overlay already on the page.
+const highlightToggle = $("showHighlights") as HTMLInputElement;
+highlightToggle.addEventListener("change", () => {
+  chrome.storage.local.set({ hyphaShowHighlights: highlightToggle.checked });
+});
+
 // ---- skills + tools: show counts + export/import as JSON -----------------
 const SKILLS_KEY = "hyphaSiteSkills";
 const TOOLS_KEY = "hyphaSiteTools";
@@ -225,8 +232,10 @@ serverInput.addEventListener("input", () => {
     "hyphaStatus",
     "hyphaServiceUrl",
     "hyphaForceBackground",
+    "hyphaShowHighlights",
   ]);
   bgToggle.checked = !!r.hyphaForceBackground;
+  highlightToggle.checked = !!r.hyphaShowHighlights;
   if (r.hyphaServerUrl) serverInput.value = r.hyphaServerUrl;
   if (r.hyphaStatus) status = r.hyphaStatus;
   if (r.hyphaServiceUrl) serviceUrl = r.hyphaServiceUrl;

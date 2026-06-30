@@ -104,6 +104,10 @@ let targetTabId: number | null = null;
 // "Work in background" — when on, tab tools never steal focus. Hydrated from
 // storage and kept fresh via storage.onChanged below.
 let forceBackground = false;
+// Whether get_browser_state draws the on-page numbered overlay (off by default —
+// it's a human aid that can linger and get in the user's way). Passed to the
+// content script on each page call.
+let showHighlights = false;
 const ctx: BrowserToolCtx = {
   getTarget: () => targetTabId,
   setTarget: (id) => {
@@ -121,6 +125,14 @@ const ctx: BrowserToolCtx = {
 async function hydrateForceBackground(): Promise<void> {
   try {
     forceBackground = !!(await chrome.storage.local.get("hyphaForceBackground")).hyphaForceBackground;
+  } catch {
+    /* ignore */
+  }
+}
+
+async function hydrateShowHighlights(): Promise<void> {
+  try {
+    showHighlights = !!(await chrome.storage.local.get("hyphaShowHighlights")).hyphaShowHighlights;
   } catch {
     /* ignore */
   }
@@ -212,6 +224,7 @@ async function handleCall(method: string, args: any[]): Promise<any> {
   ui({ type: "log", msg: `${method}(${summarize(args)})`, kind: "call" });
   await hydrateTarget(); // restore the pinned tab if the SW was reaped
   await hydrateForceBackground(); // restore the focus-mode setting too
+  await hydrateShowHighlights(); // restore the overlay setting too
   try {
     let value: any;
     if (BROWSER_TOOL_NAMES.has(method)) {
@@ -227,7 +240,7 @@ async function handleCall(method: string, args: any[]): Promise<any> {
       }
       if (tabId == null) throw new Error("No target tab — open or activate a tab first");
       await ensureContent(tabId);
-      const res = await chrome.tabs.sendMessage(tabId, { __hyphaPage: true, method, args });
+      const res = await chrome.tabs.sendMessage(tabId, { __hyphaPage: true, method, args, showHighlights });
       if (res && res.__error) throw new Error(res.__error);
       value = res ? res.value : undefined;
     }
@@ -398,7 +411,30 @@ chrome.storage?.onChanged?.addListener((changes: any, area: string) => {
   if (changes.hyphaSiteSkills) void mirrorSkillsToSync(changes.hyphaSiteSkills.newValue || {});
   if (changes.hyphaSiteTools) void mirrorToolsToSync(changes.hyphaSiteTools.newValue || {});
   if (changes.hyphaForceBackground) forceBackground = !!changes.hyphaForceBackground.newValue;
+  if (changes.hyphaShowHighlights) {
+    showHighlights = !!changes.hyphaShowHighlights.newValue;
+    // Turning the overlay off should clear any highlights already on the page so
+    // the user isn't left with a lingering overlay.
+    if (!showHighlights) void clearHighlightsOnTarget();
+  }
 });
+
+/** Best-effort: remove any numbered overlay from the current target tab. */
+async function clearHighlightsOnTarget(): Promise<void> {
+  try {
+    await hydrateTarget();
+    if (targetTabId == null) return;
+    await ensureContent(targetTabId);
+    await chrome.tabs.sendMessage(targetTabId, {
+      __hyphaPage: true,
+      method: "remove_highlights",
+      args: [],
+      showHighlights: false,
+    });
+  } catch {
+    /* ignore — tab may be gone or not injectable */
+  }
+}
 
 chrome.sidePanel?.setPanelBehavior?.({ openPanelOnActionClick: true }).catch(() => {});
 
