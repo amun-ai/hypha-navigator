@@ -46,6 +46,7 @@ const TAB_FIRST_BROWSER = new Set([
   "reload_tab",
   "go_back",
   "go_forward",
+  "call_site_tool",
 ]);
 
 /**

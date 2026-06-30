@@ -151,7 +151,7 @@ test("call_site_tool injects args (defaults applied) and uses awaitPromise, neve
     "return args.n * args.mult",
   ]);
 
-  const r = await BROWSER_TOOLS.call_site_tool.run(CTX, [ORIGIN, "calc", { n: 5 }]);
+  const r = await BROWSER_TOOLS.call_site_tool.run(CTX, [undefined, ORIGIN, "calc", { n: 5 }]);
   assert.deepEqual(r, { result: { ok: true }, type: "object" }); // shape from execute path
 
   assert.equal(evalCalls.length, 1);
@@ -169,7 +169,7 @@ test("call_site_tool blocks on a missing required arg WITHOUT evaluating", async
   installChrome();
   const { BROWSER_TOOLS } = mod;
   await BROWSER_TOOLS.set_site_tool.run(CTX, [ORIGIN, "search", "search", [{ name: "q", required: true }], "return args.q"]);
-  const r = await BROWSER_TOOLS.call_site_tool.run(CTX, [ORIGIN, "search", {}]);
+  const r = await BROWSER_TOOLS.call_site_tool.run(CTX, [undefined, ORIGIN, "search", {}]);
   assert.match(r.error, /Missing required argument\(s\): q/);
   assert.equal(evalCalls.length, 0, "must not reach Runtime.evaluate when validation fails");
 });
@@ -178,9 +178,27 @@ test("call_site_tool errors on unknown tool name", async () => {
   installChrome();
   const { BROWSER_TOOLS } = mod;
   await BROWSER_TOOLS.set_site_tool.run(CTX, [ORIGIN, "exists", "d", [], "1"]);
-  const r = await BROWSER_TOOLS.call_site_tool.run(CTX, [ORIGIN, "nope", {}]);
+  const r = await BROWSER_TOOLS.call_site_tool.run(CTX, [undefined, ORIGIN, "nope", {}]);
   assert.match(r.error, /No tool named 'nope'/);
   assert.match(r.error, /Available: exists/);
+});
+
+test("call_site_tool runs the tool in the given tab_id", async () => {
+  const attached = [];
+  globalThis.chrome = {
+    storage: { local: makeArea(), sync: makeArea() },
+    tabs: { get: async (id) => ({ id, url: "https://shop.example/cart" }) },
+    debugger: {
+      attach: async ({ tabId }) => attached.push(tabId),
+      detach: async () => {},
+      sendCommand: async (_t, m) => (m === "Runtime.evaluate" ? { result: { value: 1, type: "number" } } : {}),
+    },
+  };
+  const { BROWSER_TOOLS, detachAll } = mod;
+  await detachAll();
+  await BROWSER_TOOLS.set_site_tool.run(CTX, [ORIGIN, "ping", "p", [], "1"]);
+  await BROWSER_TOOLS.call_site_tool.run(CTX, [77, ORIGIN, "ping", {}]);
+  assert.ok(attached.includes(77), "call_site_tool must run in the passed tab_id, not the default target");
 });
 
 test("site tools sync round-trip uses separate keys and restores byte-identical", async () => {
@@ -230,7 +248,7 @@ test("call_site_tool surfaces the full error + stack trace on a runtime exceptio
   };
   const { BROWSER_TOOLS } = mod;
   await BROWSER_TOOLS.set_site_tool.run(CTX, [ORIGIN, "boom", "throws", [], "foo()"]);
-  const r = await BROWSER_TOOLS.call_site_tool.run(CTX, [ORIGIN, "boom", {}]);
+  const r = await BROWSER_TOOLS.call_site_tool.run(CTX, [undefined, ORIGIN, "boom", {}]);
   assert.equal(r.error, "TypeError: foo is not a function"); // one-line message
   assert.equal(r.name, "TypeError"); // exception class
   assert.match(r.stack, /at <anonymous>:1:13/); // FULL stack trace for debugging

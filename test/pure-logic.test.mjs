@@ -31,6 +31,16 @@ test("wrapFn maps a kwargs object to positional args in SCHEMA PROPERTY ORDER", 
   assert.equal(wrapped.length, 4);
 });
 
+test("wrapFn ignores UNKNOWN keys (even leading) and still maps known params", async () => {
+  // Regression: a stray `tab_id` passed to a tool that doesn't declare it used to
+  // make wrapFn hand the whole kwargs object to the first parameter ("[object Object]").
+  const fn = (...args) => args;
+  fn.__schema__ = { parameters: { properties: { origin: {}, name: {}, args: {} } } };
+  const wrapped = wrapFn(fn);
+  const out = await wrapped({ tab_id: 9, origin: "O", name: "N", args: { x: 1 } });
+  assert.deepEqual(out, ["O", "N", { x: 1 }]); // tab_id ignored; known params in schema order
+});
+
 test("wrapFn forwards positional args unchanged and handles empty kwargs", async () => {
   const fn = (a, b) => [a, b];
   fn.__schema__ = { parameters: { properties: { a: {}, b: {} } } };

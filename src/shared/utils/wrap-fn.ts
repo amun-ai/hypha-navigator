@@ -51,8 +51,12 @@ export function wrapFn(fn: any): any {
       if (keys.length === 0) {
         return fn();
       }
-      // Keys match schema params → destructure into positional args
-      if (paramNames.indexOf(keys[0]) !== -1) {
+      // If the bag carries ANY known schema param, treat it as kwargs and
+      // destructure into positional args — pulling only the known params and
+      // IGNORING unknown keys. (Checking just keys[0] was fragile: an unknown
+      // leading key, e.g. a tab_id passed to a tool that doesn't declare it,
+      // would fall through and hand the whole object to the first parameter.)
+      if (keys.some((k) => paramNames.indexOf(k) !== -1)) {
         return fn.apply(null, paramNames.map((n) => kw[n]));
       }
     }

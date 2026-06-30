@@ -439,11 +439,15 @@ async function hydrateStoreFromSync(store: SyncStore): Promise<void> {
 // Skills durability wrappers (the SW wires these to storage.onChanged + startup).
 export const mirrorSkillsToSync = (all: SkillStore) => mirrorStoreToSync(SKILLS_STORE, all);
 export const hydrateSkillsFromSync = () => hydrateStoreFromSync(SKILLS_STORE);
-/** Resolve the origin to scope a skill to: the explicitly-passed origin, else
- *  the current target tab's origin. Skills are always bound to an origin. */
-async function siteFor(ctx: BrowserToolCtx, explicit?: string): Promise<string> {
+/** Resolve the origin to scope a skill/tool to: the explicitly-passed origin,
+ *  else the origin of the given tab (tab_id) or the default target tab. */
+async function siteFor(
+  ctx: BrowserToolCtx,
+  explicit?: string,
+  tabId?: number | null,
+): Promise<string> {
   if (explicit) return explicit;
-  const t = await chrome.tabs.get(await resolveTarget(ctx));
+  const t = await chrome.tabs.get(await tabFor(ctx, tabId));
   return originOf(t.url) || t.url || "unknown";
 }
 
@@ -1093,10 +1097,11 @@ export const BROWSER_TOOLS: Record<string, Tool> = {
     schema: {
       name: "call_site_tool",
       description:
-        "CALL a saved site tool by name with arguments — the fast path: runs the tool's stored code (no script re-sent), with your `args` injected in scope, on the current target tab. Validates required params and applies defaults. Pass the site `origin` (from tab/browser info; defaults to the current tab), the tool `name`, and `args` (an object of argument name→value). Returns {result, type} like execute_script; on a runtime error returns { error, name, stack, line, column } with the full stack trace so you can debug the tool (then fix it with set_site_tool).",
+        "CALL a saved site tool by name with arguments — the fast path: runs the tool's stored code (no script re-sent), with your `args` injected in scope, on the given tab_id (or the default target tab). Validates required params and applies defaults. Pass the site `origin` (from tab/browser info; defaults to the current tab), the tool `name`, and `args` (an object of argument name→value). Returns {result, type} like execute_script; on a runtime error returns { error, name, stack, line, column } with the full stack trace so you can debug the tool (then fix it with set_site_tool).",
       parameters: {
         type: "object",
         properties: {
+          tab_id: { type: "number", description: "Optional: the tab to run the tool in (id from open_tab/list_tabs). Omit to use the default target tab." },
           origin: { type: "string", description: "Site origin the tool is bound to. Defaults to the current tab's origin." },
           name: { type: "string", description: "Tool name to call (from list_site_tools)" },
           args: {
@@ -1108,8 +1113,8 @@ export const BROWSER_TOOLS: Record<string, Tool> = {
         required: ["name"],
       },
     },
-    run: async (ctx, [origin, name, args]) => {
-      const o = await siteFor(ctx, origin);
+    run: async (ctx, [tab_id, origin, name, args]) => {
+      const o = await siteFor(ctx, origin, tab_id);
       const site = (await loadAllTools())[o] || {};
       const raw = site[String(name)];
       if (raw == null) {
@@ -1123,7 +1128,7 @@ export const BROWSER_TOOLS: Record<string, Tool> = {
       const t = normTool(raw);
       const built = buildCallArgs(t.params, args);
       if (!built.ok) return { error: built.error };
-      return cdpEval(await resolveTarget(ctx), t.code, built.args);
+      return cdpEval(await tabFor(ctx, tab_id), t.code, built.args);
     },
   },
 };
