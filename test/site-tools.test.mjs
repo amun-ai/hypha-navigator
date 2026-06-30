@@ -156,8 +156,10 @@ test("call_site_tool injects args (defaults applied) and uses awaitPromise, neve
 
   assert.equal(evalCalls.length, 1);
   const ev = evalCalls[0];
-  // args injected as a const preamble with provided + default values
-  assert.match(ev.expression, /const args = \{"n":5,"mult":2\};/);
+  // args injected with provided + default values, declared INSIDE the async IIFE
+  // (a top-level const args leaks across Runtime.evaluate calls → "already declared").
+  assert.match(ev.expression, /\(async \(\) => \{ const args = \{"n":5,"mult":2\};/);
+  assert.doesNotMatch(ev.expression, /^\s*const args/, "args must NOT be a top-level declaration");
   assert.match(ev.expression, /return args\.n \* args\.mult/);
   // CDP flags: the execute_script fix must hold here too
   assert.equal(ev.returnByValue, true);

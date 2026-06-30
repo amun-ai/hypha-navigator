@@ -118,9 +118,12 @@ async function cdpEval(tabId: number, code: string, argsObj?: any): Promise<any>
     };
   }
   // call_site_tool injects the call arguments as an `args` object in scope; plain
-  // execute_script passes none (preamble empty → identical behavior to before).
-  const preamble = argsObj !== undefined ? `const args = ${JSON.stringify(argsObj)};\n` : "";
-  const expression = `${preamble}(async () => { ${autoReturn(code)} })()`;
+  // execute_script passes none. The declaration MUST go INSIDE the async IIFE:
+  // a top-level `const args` in Runtime.evaluate leaks into the tab's lexical
+  // scope and the NEXT call on the same tab throws "args has already been
+  // declared". Inside the function it's call-scoped, so repeated calls are safe.
+  const argsDecl = argsObj !== undefined ? `const args = ${JSON.stringify(argsObj)};\n` : "";
+  const expression = `(async () => { ${argsDecl}${autoReturn(code)} })()`;
   const res: any = await chrome.debugger.sendCommand({ tabId }, "Runtime.evaluate", {
     expression,
     returnByValue: true,
