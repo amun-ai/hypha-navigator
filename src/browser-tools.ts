@@ -65,9 +65,12 @@ async function cdpEval(tabId: number, code: string): Promise<any> {
   const res: any = await chrome.debugger.sendCommand({ tabId }, "Runtime.evaluate", {
     expression,
     returnByValue: true,
+    // awaitPromise makes CDP resolve our async IIFE and return its real value.
+    // Do NOT set replMode:true — REPL mode returns the UNAWAITED completion value
+    // (ignoring awaitPromise), so the Promise serializes by-value to {}. Each call
+    // runs in its own function scope, so we don't need REPL's let-redeclaration.
     awaitPromise: true,
     userGesture: true,
-    replMode: true,
   });
   if (res?.exceptionDetails) {
     const ex = res.exceptionDetails;
