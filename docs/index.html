@@ -129,6 +129,31 @@ curl -X POST "$SERVICE_URL/open_tab" -d '{"url":"https://example.com"}'
 curl "$SERVICE_URL/get_browser_state?_mode=last"     # current target tab</code></pre>
       </section>
 
+      <section>
+        <h2>Drive it from the command line (hyd)</h2>
+        <p class="note">
+          Prefer a CLI over curl? The
+          <a href="https://pypi.org/project/hypha-debugger/">hypha-debugger</a> pip package
+          ships a <code>hyd</code> CLI (needs <b>hypha-debugger ≥ 0.2.4</b> for the TLS fix).
+          Register this browser as a profile once, then drive it with tiny commands —
+          the same CLI also drives terminal (Python) targets.
+        </p>
+        <pre><code>pipx install hypha-debugger           # or: pip install hypha-debugger
+hyd profile add web "$SERVICE_URL" --type browser   # add --token &lt;t&gt; if protected
+export HYD_PROFILE=web
+
+hyd 'document.title'                  # bare form runs JavaScript (execute_script)
+hyd js 'await fetch("/api/data").then(r=&gt;r.json())'
+hyd nav 'https://example.com'         # navigate the page
+hyd shot page.png                     # save a screenshot to a PNG
+hyd call get_browser_state            # call any tool by name</code></pre>
+        <p class="note">
+          <code>$SERVICE_URL</code> is the side panel's Service URL (if you copied the
+          <code>get_skill_md</code> URL, drop the trailing <code>/get_skill_md</code>). If
+          <code>hyd</code> isn't on your PATH, use <code>python -m hypha_debugger.cli</code>.
+        </p>
+      </section>
+
       <footer>
         <p>
           <a href="https://github.com/amun-ai/hypha-navigator">GitHub</a> ·

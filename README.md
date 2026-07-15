@@ -70,6 +70,28 @@ you **Pin current** / **Focus** the target.
    curl "$SERVICE_URL/get_browser_state?_mode=last"     # current target tab
    ```
 
+## Drive it from the command line (`hyd`)
+
+Prefer a CLI over curl? The [`hypha-debugger`](https://pypi.org/project/hypha-debugger/)
+pip package ships a **`hyd`** CLI (needs **hypha-debugger ≥ 0.2.4** for the certifi TLS
+fix). Register this browser as a profile once, then drive it with tiny commands — the
+same CLI also drives terminal (Python) targets.
+
+```bash
+pipx install hypha-debugger           # or: pip install hypha-debugger
+hyd profile add web "$SERVICE_URL" --type browser   # add --token <t> if protected
+export HYD_PROFILE=web
+
+hyd 'document.title'                  # bare form runs JavaScript (execute_script)
+hyd js 'await fetch("/api/data").then(r=>r.json())'
+hyd nav 'https://example.com'         # navigate the page
+hyd shot page.png                     # save a screenshot to a PNG
+hyd call get_browser_state            # call any tool by name
+```
+
+`$SERVICE_URL` is the side panel's Service URL (if you copied the `get_skill_md` URL, drop
+the trailing `/get_skill_md`). If `hyd` isn't on your PATH, use `python -m hypha_debugger.cli`.
+
 ## Site skills
 
 The smart part: Hypha Navigator accumulates **per-site skills** — each an
